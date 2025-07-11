@@ -47,25 +47,224 @@ class YOLOv8Wrapper(BasePoseModel):
         self.load_model()
 
     def load_model(self) -> None:
-        """Load YOLOv8-Pose model"""
+        """Load YOLOv8-Pose model with robust download handling"""
+        import os
+        import logging
+        from pathlib import Path
+
         try:
             # Construct model name
             model_name = f"yolov8{self.model_size}-pose.pt"
+            model_path = Path(model_name)
 
-            # Load model
-            self.model = YOLO(model_name)
+            # Clean up any corrupted model files
+            if model_path.exists():
+                try:
+                    # Try to load and validate the existing file
+                    import torch
 
-            # Move to device
-            self.model.to(self.device)
+                    torch.load(model_path, map_location="cpu")
+                    logging.info(f"Found valid {model_name}")
+                except Exception:
+                    logging.warning(f"Found corrupted {model_name}, removing...")
+                    model_path.unlink()
 
-            # Set precision
-            if self.half_precision and self.device != "cpu":
-                self.model.half()
+            # Load model with retry logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        logging.info(
+                            f"Attempting to download {model_name} (try {attempt + 1}/{max_retries})"
+                        )
 
-            self.is_initialized = True
+                    self.model = YOLO(model_name)
+
+                    # Move to device
+                    self.model.to(self.device)
+
+                    # Set precision
+                    if self.half_precision and self.device != "cpu":
+                        self.model.half()
+
+                    self.is_initialized = True
+                    logging.info(f"Successfully loaded YOLOv8-{self.model_size}-pose")
+                    return
+
+                except Exception as e:
+                    if "PytorchStreamReader" in str(e) or "central directory" in str(e):
+                        logging.warning(
+                            f"Download corrupted on attempt {attempt + 1}: {e}"
+                        )
+                        # Clean up corrupted file
+                        if model_path.exists():
+                            model_path.unlink()
+
+                        if attempt == max_retries - 1:
+                            # Last attempt - try alternative download strategy
+                            return self._try_alternative_download()
+                    else:
+                        # Different error - reraise immediately
+                        raise e
 
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize YOLOv8-Pose: {e}")
+            raise RuntimeError(
+                f"Failed to initialize YOLOv8-Pose after all attempts: {e}"
+            )
+
+    def _try_alternative_download(self):
+        """Try alternative download strategies before fallback models"""
+        import logging
+        import requests
+        import torch
+        from pathlib import Path
+
+        model_name = f"yolov8{self.model_size}-pose.pt"
+        model_path = Path(model_name)
+
+        # Alternative download URLs
+        download_urls = [
+            f"https://github.com/ultralytics/assets/releases/download/v8.0.0/yolov8{self.model_size}-pose.pt",
+            f"https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{self.model_size}-pose.pt",
+        ]
+
+        for url in download_urls:
+            try:
+                logging.info(f"Trying alternative download from: {url}")
+
+                response = requests.get(url, stream=True, timeout=30)
+                response.raise_for_status()
+
+                # Download with progress
+                total_size = int(response.headers.get("content-length", 0))
+                downloaded = 0
+
+                with open(model_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                percent = (downloaded / total_size) * 100
+                                if downloaded % (1024 * 1024) == 0:  # Log every MB
+                                    logging.info(
+                                        f"Downloaded {downloaded / (1024*1024):.1f}/{total_size / (1024*1024):.1f} MB ({percent:.1f}%)"
+                                    )
+
+                # Validate downloaded file
+                try:
+                    torch.load(model_path, map_location="cpu")
+                    logging.info(f"Successfully downloaded and validated {model_name}")
+
+                    # Now try to load the model
+                    self.model = YOLO(str(model_path))
+                    self.model.to(self.device)
+
+                    if self.half_precision and self.device != "cpu":
+                        self.model.half()
+
+                    self.is_initialized = True
+                    logging.info(
+                        f"Successfully loaded YOLOv8-{self.model_size}-pose from alternative download"
+                    )
+                    return
+
+                except Exception as e:
+                    logging.warning(f"Downloaded file validation failed: {e}")
+                    if model_path.exists():
+                        model_path.unlink()
+                    continue
+
+            except Exception as e:
+                logging.warning(f"Alternative download failed: {e}")
+                if model_path.exists():
+                    model_path.unlink()
+                continue
+
+        # If alternative downloads fail, try fallback models
+        return self._try_fallback_model()
+
+    def _try_fallback_model(self):
+        """Try fallback model loading strategies"""
+        import logging
+
+        fallback_sizes = ["n", "s", "m"]  # Try different sizes
+        if self.model_size in fallback_sizes:
+            fallback_sizes.remove(self.model_size)
+
+        for fallback_size in fallback_sizes:
+            try:
+                logging.info(f"Trying fallback model: yolov8{fallback_size}-pose")
+                fallback_name = f"yolov8{fallback_size}-pose.pt"
+
+                # Try alternative download for fallback model too
+                fallback_path = Path(fallback_name)
+                if not fallback_path.exists():
+                    self._download_model_directly(fallback_size)
+
+                self.model = YOLO(fallback_name)
+                self.model.to(self.device)
+
+                if self.half_precision and self.device != "cpu":
+                    self.model.half()
+
+                self.model_size = fallback_size  # Update model size
+                self.is_initialized = True
+                logging.info(
+                    f"Successfully loaded fallback model: yolov8{fallback_size}-pose"
+                )
+                return
+
+            except Exception as e:
+                logging.warning(
+                    f"Fallback model yolov8{fallback_size}-pose also failed: {e}"
+                )
+                continue
+
+        # If all fallbacks fail, raise error
+        raise RuntimeError(
+            "All YOLOv8 model download attempts failed. Please check internet connection."
+        )
+
+    def _download_model_directly(self, model_size: str):
+        """Download model directly using requests"""
+        import requests
+        import torch
+        from pathlib import Path
+        import logging
+
+        model_name = f"yolov8{model_size}-pose.pt"
+        model_path = Path(model_name)
+
+        download_urls = [
+            f"https://github.com/ultralytics/assets/releases/download/v8.0.0/yolov8{model_size}-pose.pt",
+            f"https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{model_size}-pose.pt",
+        ]
+
+        for url in download_urls:
+            try:
+                logging.info(f"Direct downloading {model_name} from: {url}")
+
+                response = requests.get(url, stream=True, timeout=30)
+                response.raise_for_status()
+
+                with open(model_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+
+                # Validate
+                torch.load(model_path, map_location="cpu")
+                logging.info(f"Successfully downloaded {model_name}")
+                return
+
+            except Exception as e:
+                logging.warning(f"Direct download failed: {e}")
+                if model_path.exists():
+                    model_path.unlink()
+                continue
+
+        raise RuntimeError(f"Failed to download {model_name} from all sources")
 
     def predict(self, image: np.ndarray) -> Dict[str, Any]:
         """Run YOLOv8-Pose estimation on image

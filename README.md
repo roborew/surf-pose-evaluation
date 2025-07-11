@@ -194,6 +194,32 @@ ssh -L 5000:localhost:5000 user@training-machine
 # Then run mlflow ui on remote machine
 ```
 
+### MLflow Compare-Runs Configuration
+
+For optimal model comparison in the MLflow UI (http://127.0.0.1:5000/#/compare-runs):
+
+**Essential Parameters to Add:**
+
+- `model_name` - Model identifier (yolov8_pose, mediapipe)
+- `device` - Compute device (cuda, mps, cpu)
+- `confidence_threshold` - Detection threshold
+- `model_size` - YOLOv8 variant (n,s,m,l) or MediaPipe complexity (0,1,2)
+
+**Key Metrics to Compare:**
+
+- `pose_pck_error_mean` - Accuracy (lower is better)
+- `perf_fps_mean` - Speed (higher is better)
+- `pose_detection_f1_mean` - Detection quality (higher is better)
+- `perf_avg_inference_time_mean` - Inference time (lower is better)
+- `pose_detection_precision_mean` - Precision
+- `pose_detection_recall_mean` - Recall
+
+**Analysis Priority:**
+
+1. Sort by `pose_pck_error_mean` for best accuracy
+2. Filter `pose_detection_f1_mean` > 0.5 for viable models
+3. Plot `perf_fps_mean` vs `pose_pck_error_mean` for speed/accuracy trade-offs
+
 ## Usage Examples
 
 ### Python API

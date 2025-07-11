@@ -1,3 +1,9 @@
 data
 condaenv.*
 results/
+yolov*.pt
+yolov*.onnx
+yolov*.pth
+yolov*.ckpt
+yolov*/  # Ignore any folders named yolov* (optional, if model folders exist)
+yolov8n-pose.pt
