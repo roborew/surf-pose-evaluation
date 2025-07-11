@@ -1,0 +1,200 @@
+# macOS-specific Evaluation Configuration for Surfing Pose Estimation Comparison
+# This file is optimized for Apple Silicon Macs (M1/M2)
+
+# Experiment metadata
+experiment:
+  name: "surf_pose_backbone_comparison_macos"
+  description: "Systematic evaluation of pose estimation libraries for surfing action recognition on Apple Silicon"
+  version: "1.0"
+  author: "Your Name"
+
+# Dataset configuration
+dataset:
+  # Base paths (relative to project root)
+  base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
+
+  # Video sources
+  video_clips:
+    h264_path: "03_CLIPPED/h264"
+    ffv1_path: "03_CLIPPED/ffv1" # Available on training machines
+
+  # Annotation sources
+  annotations:
+    labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
+    sony_300_labels: "sony_300"
+    sony_70_labels: "sony_70"
+
+  # Data splits for evaluation
+  splits:
+    train_ratio: 0.70
+    val_ratio: 0.15
+    test_ratio: 0.15
+    random_seed: 42
+
+    # Zoom variation handling to prevent data leakage
+    zoom_handling:
+      enabled: true
+      balanced_distribution: true
+      target_distribution:
+        default: 0.33 # ~33% of clips use default zoom (C0019_clip_1.mp4)
+        wide: 0.33 # ~33% of clips use wide zoom (C0019_clip_1_wide.mp4)
+        full: 0.34 # ~34% of clips use full zoom (C0019_clip_1_full.mp4)
+      randomized_selection: true # Randomize zoom selection within balanced constraints
+
+  # Video processing settings
+  video:
+    target_fps: 25
+    max_resolution: [1920, 1080]
+    min_resolution: [640, 480]
+    supported_formats: [".mp4", ".avi", ".mov", ".mkv"]
+
+# Model configuration
+models:
+  # Models to evaluate (macOS compatible)
+  enabled_models:
+    - "mediapipe" # Excellent on Apple Silicon
+    # - "yolov8_pose"  # Enable if you want to test (supports MPS)
+    # Note: MMPose may have limited Apple Silicon support
+
+  # Model-specific settings
+  default_settings:
+    confidence_threshold: 0.3
+    batch_size: 1 # Keep small for memory efficiency
+    device: "mps" # Metal Performance Shaders for Apple Silicon
+    half_precision: false # MPS doesn't support FP16 well yet
+
+  # Performance optimization
+  optimization:
+    use_tensorrt: false # Not available on macOS
+    use_onnx: false # Skip for initial testing
+    compile_models: false # PyTorch 2.0 compile may not work well on MPS
+
+# Evaluation configuration
+evaluation:
+  # Test subsets for different evaluation phases
+  quick_test:
+    num_clips: 20 # Reduced for local testing
+    max_duration_seconds: 10
+    cameras: ["SONY_300", "SONY_70"]
+
+  comprehensive_test:
+    num_clips: 100 # Reduced for local machine
+    max_duration_seconds: 30
+    cameras: ["SONY_300", "SONY_70"]
+    sessions: ["SESSION_060325", "SESSION_070325", "SESSION_080325"]
+
+  # Metrics to compute
+  metrics:
+    pose_accuracy:
+      - "pck_0.1" # PCK at 10% threshold
+      - "pck_0.2" # PCK at 20% threshold (primary metric)
+      - "pck_0.3" # PCK at 30% threshold
+      - "mpjpe" # Mean Per Joint Position Error (3D models)
+
+    performance:
+      - "inference_latency_ms"
+      - "memory_usage_gb"
+      - "throughput_fps"
+      - "model_size_mb"
+
+    temporal:
+      - "temporal_consistency"
+      - "pose_smoothness"
+      - "missing_detections_rate"
+
+  # Ground truth sources for comparison
+  ground_truth:
+    use_manual_annotations: true
+    use_cross_validation: true
+    minimum_keypoint_visibility: 0.5
+
+# MLflow configuration
+mlflow:
+  enabled: true
+  experiment_name: "surf_pose_comparison_macos"
+  tracking_uri: "./results/mlruns"
+
+  # What to log
+  logging:
+    parameters: true
+    metrics: true
+    artifacts: true
+    models: false # Disable model logging initially to save space
+
+    # Artifact logging
+    log_predictions: true
+    log_visualizations: true
+    max_videos_per_run: 3 # Reduced for local testing
+
+  # Tags for organization
+  default_tags:
+    project: "surf_pose_evaluation"
+    stage: "research"
+    dataset: "widemouth_march_2025"
+    platform: "macos_apple_silicon"
+
+# Optuna hyperparameter optimization
+optuna:
+  enabled: false # Disable initially for simpler testing
+  study_name: "surf_pose_optimization_macos"
+  direction: "maximize" # Maximize PCK@0.2
+  n_trials: 50 # Reduced for local testing
+  timeout_minutes: 180 # 3 hours
+
+  # Optimization target
+  objective:
+    primary_metric: "pck_0.2"
+    secondary_metrics: ["inference_latency_ms", "memory_usage_gb"]
+    weights: [0.7, 0.2, 0.1] # Primary, speed, memory
+
+# Hardware configuration (Apple Silicon specific)
+hardware:
+  # Device settings
+  device:
+    primary: "mps" # Metal Performance Shaders
+    fallback: "cpu" # Fallback to CPU if MPS fails
+
+  # CPU settings
+  cpu:
+    num_workers: 4 # Apple Silicon has efficient cores
+    num_threads: 8
+
+  # Memory management (Apple Silicon unified memory)
+  memory:
+    max_memory_gb: 8 # Adjust based on your Mac's RAM
+    cache_enabled: true
+    clear_cache_frequency: 25 # Clear more frequently
+
+# Visualization and output
+output:
+  # Results directory
+  results_dir: "./results"
+
+  # Visualization settings
+  visualization:
+    enabled: true
+    save_overlay_videos: true
+    save_keypoint_plots: true
+    save_comparison_plots: true
+    max_examples_per_model: 5 # Reduced for local testing
+
+  # Report generation
+  reports:
+    generate_html_report: true
+    generate_pdf_summary: false
+    include_failure_analysis: true
+
+# Logging configuration
+logging:
+  level: "INFO" # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  save_to_file: true
+  log_file: "./results/evaluation.log"
+
+# Development and debugging
+debug:
+  enabled: false
+  save_intermediate_results: false
+  profile_memory: false
+  profile_compute: false
+  verbose_errors: true

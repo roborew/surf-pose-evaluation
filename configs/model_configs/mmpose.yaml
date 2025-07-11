@@ -1,0 +1,110 @@
+# MMPose Configuration
+# Research-grade pose estimation with extensive model zoo
+
+model:
+  name: "mmpose"
+  type: "2d_pose"
+  description: "OpenMMLab MMPose - comprehensive pose estimation toolkit"
+
+  # Model selection
+  model_config:
+    # Top-down approach (detection + pose)
+    detector_config: "projects/rtmpose/rtmdet/person/rtmdet_nano_320-8xb32_coco-person.py"
+    detector_checkpoint: "https://download.openmmlab.com/mmpose/v1/projects/rtmpose/rtmdet_nano_320-8xb32_coco-person.pth"
+
+    pose_config: "projects/rtmpose/rtmpose/body_2d_keypoint/rtmpose-m_8xb256-420e_coco-256x192.py"
+    pose_checkpoint: "https://download.openmmlab.com/mmpose/v1/projects/rtmpose/rtmpose-m_8xb256-420e_coco-256x192.pth"
+
+  # Alternative models for comparison
+  alternative_models:
+    lightweight:
+      pose_config: "projects/rtmpose/rtmpose/body_2d_keypoint/rtmpose-s_8xb256-420e_coco-256x192.py"
+      pose_checkpoint: "https://download.openmmlab.com/mmpose/v1/projects/rtmpose/rtmpose-s_8xb256-420e_coco-256x192.pth"
+
+    high_accuracy:
+      pose_config: "configs/body_2d_keypoint/topdown_heatmap/coco/td-hm_hrnet-w48_8xb32-210e_coco-256x192.py"
+      pose_checkpoint: "https://download.openmmlab.com/mmpose/top_down/hrnet/hrnet_w48_coco_256x192-b9e0b3ab_20200708.pth"
+
+  # Model parameters
+  parameters:
+    detection_threshold: 0.3
+    nms_threshold: 0.3
+    pose_threshold: 0.3
+    use_oks_nms: true
+    oks_threshold: 0.9
+
+  # Input preprocessing
+  preprocessing:
+    image_size: [192, 256] # [width, height]
+    pixel_std: [200.0, 200.0]
+    mean: [123.675, 116.28, 103.53]
+    std: [58.395, 57.12, 57.375]
+
+  # Post-processing
+  postprocessing:
+    use_udp: true # Unbiased Data Processing
+    target_type: "GaussianHeatmap"
+    use_different_joint_weights: false
+
+# Performance characteristics
+performance:
+  expected_fps: 15
+  memory_usage_mb: 800
+  edge_compatible: false
+  real_time_capable: true
+
+# Evaluation specific settings
+evaluation:
+  # Standard COCO 17 keypoint format
+  keypoint_format: "coco_17"
+  coordinate_system: "pixel"
+  confidence_included: true
+
+  # Quality thresholds
+  quality_thresholds:
+    min_confidence: 0.3
+    min_visibility: 0.5
+    max_missing_keypoints: 3
+
+# Optuna hyperparameter optimization ranges
+optuna_search_space:
+  detection_threshold:
+    type: "uniform"
+    low: 0.1
+    high: 0.7
+
+  pose_threshold:
+    type: "uniform"
+    low: 0.1
+    high: 0.7
+
+  nms_threshold:
+    type: "uniform"
+    low: 0.1
+    high: 0.8
+
+  model_variant:
+    type: "categorical"
+    choices: ["lightweight", "default", "high_accuracy"]
+
+# Model characteristics
+characteristics:
+  strengths:
+    - "State-of-the-art accuracy on COCO dataset"
+    - "Extensive model zoo with various speed/accuracy tradeoffs"
+    - "Well-documented and actively maintained"
+    - "Strong academic backing with latest research"
+    - "Comprehensive evaluation tools"
+
+  limitations:
+    - "Requires GPU for reasonable inference speed"
+    - "Complex installation and dependencies"
+    - "Larger model sizes compared to mobile solutions"
+    - "Two-stage pipeline (detection + pose) adds complexity"
+    - "Primarily designed for research, not production"
+
+  use_cases:
+    - "Research and academic applications"
+    - "High-accuracy pose estimation requirements"
+    - "Benchmarking and comparison studies"
+    - "Applications with powerful hardware"

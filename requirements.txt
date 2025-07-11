@@ -1,0 +1,41 @@
+# Core scientific computing
+numpy>=1.24.3
+scipy>=1.11.1
+pandas>=2.0.3
+matplotlib>=3.7.2
+seaborn>=0.12.2
+scikit-learn>=1.3.0
+
+# PyTorch (adjust CUDA version as needed)
+torch>=2.0.1
+torchvision>=0.15.2
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+# Video and image processing
+opencv-python>=4.8.0
+imageio>=2.31.1
+pillow>=10.0.0
+
+# Pose estimation libraries
+mediapipe>=0.10.3
+ultralytics>=8.0.134
+
+# Experiment tracking
+mlflow>=2.5.0
+optuna>=3.2.0
+
+# Utilities
+tqdm>=4.65.0
+pyyaml>=6.0
+rich>=13.4.2
+psutil>=5.9.5
+
+# Development
+pytest>=7.4.0
+jupyter>=1.0.0
+
+# MMPose (optional - install separately if needed)
+# mmengine==0.8.4
+# mmcv==2.0.1  
+# mmdet==3.1.0
+# mmpose==1.1.0 
