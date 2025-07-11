@@ -57,7 +57,7 @@ dependencies:
       - xtcocotools==1.14.1
 
       # MediaPipe
-      - mediapipe==0.10.3
+      - mediapipe==0.10.11
 
       # YOLOv8 (Ultralytics)
       - ultralytics==8.0.134

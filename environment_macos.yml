@@ -42,7 +42,7 @@ dependencies:
       - optuna==3.2.0
 
       # MediaPipe (excellent performance on Apple Silicon)
-      - mediapipe==0.10.3
+      - mediapipe==0.10.11
 
       # YOLOv8 (supports Apple Silicon MPS)
       - ultralytics==8.0.134

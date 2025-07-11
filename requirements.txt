@@ -17,7 +17,7 @@ imageio>=2.31.1
 pillow>=10.0.0
 
 # Pose estimation libraries
-mediapipe>=0.10.3
+mediapipe>=0.10.11
 ultralytics>=8.0.134
 
 # Experiment tracking
