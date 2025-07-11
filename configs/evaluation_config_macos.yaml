@@ -53,8 +53,9 @@ models:
   # Models to evaluate (macOS compatible)
   enabled_models:
     - "mediapipe" # Excellent on Apple Silicon
-    - "yolov8_pose" # Enable if you want to test (supports MPS)
-    # Note: MMPose may have limited Apple Silicon support
+    - "blazepose" # Google's optimized real-time 3D pose estimation
+    - "yolov8_pose" # YOLO pose estimation (supports MPS)
+    # Note: MMPose and HRNet require additional installation on macOS
 
   # Model-specific settings
   default_settings:

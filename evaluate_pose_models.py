@@ -32,6 +32,11 @@ from utils.visualization import VisualizationUtils
 
 # Import other model wrappers when available
 try:
+    from models.blazepose_wrapper import BlazePoseWrapper
+except ImportError:
+    BlazePoseWrapper = None
+
+try:
     from models.mmpose_wrapper import MMPoseWrapper
 except ImportError:
     MMPoseWrapper = None
@@ -94,6 +99,10 @@ class PoseEvaluator:
 
         # MediaPipe (always available)
         registry["mediapipe"] = MediaPipeWrapper
+
+        # BlazePose (if available)
+        if BlazePoseWrapper is not None:
+            registry["blazepose"] = BlazePoseWrapper
 
         # MMPose (if available)
         if MMPoseWrapper is not None:

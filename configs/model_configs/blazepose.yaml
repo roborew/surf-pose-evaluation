@@ -1,0 +1,149 @@
+# BlazePose Configuration
+# Google's lightweight real-time 3D pose estimation
+
+model:
+  name: "blazepose"
+  type: "3d_pose"
+  description: "Google BlazePose - lightweight real-time 3D human pose estimation optimized for mobile"
+
+  # Model parameters
+  parameters:
+    model_complexity: 1 # 0: Lite, 1: Full, 2: Heavy
+    min_detection_confidence: 0.5
+    min_tracking_confidence: 0.5
+    smooth_landmarks: true
+    enable_segmentation: false
+    smooth_segmentation: true
+    static_image_mode: false # Set to true for single images
+
+  # BlazePose specific settings (different from MediaPipe)
+  blazepose_settings:
+    input_resolution: [256, 256] # BlazePose uses 256x256 (vs MediaPipe's variable)
+    detector_resolution: [224, 224] # SSD detector resolution
+    use_3d_landmarks: true # BlazePose native 3D support
+    z_reference_point: "hips" # Z-coordinates relative to hips
+    use_alignment_mode: true # Use keypoint alignment vs simple bounding box
+
+  # Input preprocessing
+  preprocessing:
+    normalize: true
+    target_size: [256, 256] # Fixed BlazePose input size
+    maintain_aspect_ratio: false # BlazePose expects exact 256x256
+    interpolation: "bilinear"
+
+  # Output format
+  output:
+    keypoint_format: "blazepose_33" # 33 keypoints with native 3D
+    coordinate_system: "metric" # Real-world metric coordinates
+    confidence_included: true
+    visibility_included: true
+    presence_included: true # BlazePose-specific presence score
+
+# Performance characteristics
+performance:
+  expected_fps: 30 # Optimized for real-time
+  memory_usage_mb: 150 # Lightweight compared to full MediaPipe
+  edge_compatible: true
+  real_time_capable: true
+  mobile_optimized: true # Key differentiator
+
+# Evaluation specific settings
+evaluation:
+  # Keypoint mapping to standard pose format (17 keypoints COCO format)
+  keypoint_mapping:
+    nose: 0
+    left_eye_inner: 1
+    left_eye: 2
+    left_eye_outer: 3
+    right_eye_inner: 4
+    right_eye: 5
+    right_eye_outer: 6
+    left_ear: 7
+    right_ear: 8
+    mouth_left: 9
+    mouth_right: 10
+    left_shoulder: 11
+    right_shoulder: 12
+    left_elbow: 13
+    right_elbow: 14
+    left_wrist: 15
+    right_wrist: 16
+    left_pinky: 17
+    right_pinky: 18
+    left_index: 19
+    right_index: 20
+    left_thumb: 21
+    right_thumb: 22
+    left_hip: 23
+    right_hip: 24
+    left_knee: 25
+    right_knee: 26
+    left_ankle: 27
+    right_ankle: 28
+    left_heel: 29
+    right_heel: 30
+    left_foot_index: 31
+    right_foot_index: 32
+
+  # Quality thresholds for evaluation
+  quality_thresholds:
+    min_confidence: 0.3
+    min_visibility: 0.5
+    min_presence: 0.5 # BlazePose-specific
+    max_missing_keypoints: 5
+
+# Model characteristics
+characteristics:
+  strengths:
+    - "Optimized for real-time mobile performance (15+ FPS)"
+    - "Native 3D pose estimation with metric coordinates"
+    - "Lightweight architecture (150MB vs 200MB+ for alternatives)"
+    - "Robust tracking with smooth temporal consistency"
+    - "Designed specifically for on-device inference"
+    - "Superior performance on mobile and edge devices"
+
+  limitations:
+    - "Fewer configuration options compared to full MediaPipe"
+    - "Primarily optimized for single-person scenarios"
+    - "Less academic research backing compared to MMPose/HRNet"
+    - "Limited customization of model architecture"
+    - "May have lower accuracy than heavy research models"
+
+  use_cases:
+    - "Real-time fitness and sports applications"
+    - "Mobile AR/VR pose-driven experiences"
+    - "Edge computing scenarios with limited resources"
+    - "Consumer applications requiring smooth performance"
+    - "Avatar control and motion capture on mobile devices"
+
+# Optuna hyperparameter optimization ranges
+optuna_search_space:
+  model_complexity:
+    type: "categorical"
+    choices: [0, 1, 2] # Lite, Full, Heavy
+
+  min_detection_confidence:
+    type: "uniform"
+    low: 0.1
+    high: 0.9
+
+  min_tracking_confidence:
+    type: "uniform"
+    low: 0.1
+    high: 0.9
+
+  smooth_landmarks:
+    type: "categorical"
+    choices: [true, false]
+
+  use_alignment_mode:
+    type: "categorical"
+    choices: [true, false]
+
+# Comparison with MediaPipe
+comparison_with_mediapipe:
+  speed: "BlazePose typically 20-30% faster"
+  accuracy: "Similar accuracy, optimized for mobile"
+  memory: "20-30% lower memory footprint"
+  3d_support: "Native 3D vs MediaPipe's 2.5D"
+  use_case: "BlazePose: mobile-first, MediaPipe: general-purpose"

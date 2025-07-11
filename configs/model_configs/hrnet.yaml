@@ -175,3 +175,51 @@ dataset_info:
     - [3, 5]
     - [4, 6]
     - [5, 7]
+
+# Model characteristics
+characteristics:
+  strengths:
+    - "High-resolution feature maps maintain spatial precision"
+    - "State-of-the-art accuracy on pose estimation benchmarks"
+    - "Strong performance on small and occluded keypoints"
+    - "Well-validated academic model with extensive research backing"
+    - "Good generalization across different pose scenarios"
+
+  limitations:
+    - "High computational requirements (GPU strongly recommended)"
+    - "Large memory footprint compared to mobile-optimized models"
+    - "Slower inference speed than single-stage models"
+    - "Requires separate person detection step"
+    - "Complex setup and dependency management"
+
+  use_cases:
+    - "High-accuracy pose estimation research"
+    - "Benchmark and comparison studies"
+    - "Applications with powerful hardware and quality requirements"
+    - "Academic research and paper validation"
+
+# Optuna hyperparameter optimization ranges
+optuna_search_space:
+  model_variant:
+    type: "categorical"
+    choices: ["hrnet_w32", "hrnet_w48"]
+
+  keypoint_threshold:
+    type: "uniform"
+    low: 0.1
+    high: 0.6
+
+  bbox_threshold:
+    type: "uniform"
+    low: 0.1
+    high: 0.7
+
+  detection_threshold:
+    type: "uniform"
+    low: 0.1
+    high: 0.7
+
+  nms_threshold:
+    type: "uniform"
+    low: 0.3
+    high: 0.8
