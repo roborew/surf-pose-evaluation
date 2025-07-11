@@ -11,7 +11,7 @@ This framework systematically compares pose estimation models to determine the o
 - **MMPose** - Extensive model zoo with high accuracy
 - **MediaPipe Pose** - Fast, edge-optimized for real-time inference
 - **YOLOv8-Pose** - Unified detection and pose estimation
-- **HRNet** - High-accuracy reference implementation
+- **MMPose** - Industry-standard framework (includes HRNet backbones)
 
 > **Note**: OpenPose excluded due to poor performance (5 FPS vs 20-60 FPS for modern alternatives) and installation complexity.
 
@@ -37,7 +37,7 @@ python test_zoom_loading.py
 python -c "import torch; print(f'MPS available: {torch.backends.mps.is_available()}')"
 ```
 
-**Capabilities:** ✅ MediaPipe ✅ Basic YOLOv8 ✅ MPS acceleration ❌ MMPose ❌ HRNet
+**Capabilities:** ✅ MediaPipe ✅ BlazePose ✅ YOLOv8 ✅ MPS acceleration ❌ MMPose (setup required)
 
 #### Linux Setup (Production)
 
@@ -76,7 +76,7 @@ python evaluate_pose_models.py \
 # Run in tmux for long sessions (Linux)
 tmux new-session -d -s pose_eval
 tmux send-keys -t pose_eval "conda activate surf_pose_eval" Enter
-tmux send-keys -t pose_eval "python evaluate_pose_models.py --config configs/evaluation_config.yaml --models mediapipe mmpose yolov8_pose hrnet --max-clips 300" Enter
+tmux send-keys -t pose_eval "python evaluate_pose_models.py --config configs/evaluation_config.yaml --models mediapipe blazepose yolov8_pose mmpose --max-clips 300" Enter
 tmux attach -t pose_eval
 ```
 
@@ -236,7 +236,7 @@ results = evaluator.quick_screening(
 
 # Comprehensive evaluation with optimization
 results = evaluator.full_evaluation(
-    models=["mmpose", "hrnet", "mediapipe", "yolov8_pose"],
+    models=["mmpose", "mediapipe", "blazepose", "yolov8_pose"],
     num_clips=300,
     use_optuna=True
 )

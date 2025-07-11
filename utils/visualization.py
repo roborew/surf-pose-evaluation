@@ -48,9 +48,8 @@ class VisualizationUtils:
         # Colors for different models
         self.model_colors = {
             "mediapipe": (0, 255, 0),  # Green
-            "mmpose": (255, 0, 0),  # Red
+            "mmpose": (255, 0, 0),  # Red (includes HRNet backbones)
             "yolov8_pose": (0, 0, 255),  # Blue
-            "hrnet": (255, 255, 0),  # Yellow
             "blazepose": (255, 0, 255),  # Magenta
         }
 

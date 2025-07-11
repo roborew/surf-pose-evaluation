@@ -56,8 +56,7 @@ models:
     - "blazepose"
     - "yolov8_pose"
     # Note: Enable these after proper installation:
-    # - "mmpose"    # Requires: pip install mmengine mmcv mmdet mmpose
-    # - "hrnet"     # Requires: MMPose + additional HRNet setup
+    # - "mmpose"    # Requires: pip install mmengine mmcv mmdet mmpose (includes HRNet backbones)
     # - "openpose"  # Enable if OpenPose is properly installed
 
   # Model-specific settings (detailed configs in model_configs/)

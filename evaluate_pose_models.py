@@ -46,10 +46,7 @@ try:
 except ImportError:
     YOLOv8Wrapper = None
 
-try:
-    from models.hrnet_wrapper import HRNetWrapper
-except ImportError:
-    HRNetWrapper = None
+# HRNet functionality is available through MMPose framework
 
 
 class PoseEvaluator:
@@ -112,9 +109,7 @@ class PoseEvaluator:
         if YOLOv8Wrapper is not None:
             registry["yolov8_pose"] = YOLOv8Wrapper
 
-        # HRNet (if available)
-        if HRNetWrapper is not None:
-            registry["hrnet"] = HRNetWrapper
+        # HRNet functionality available through MMPose framework
 
         return registry
 
