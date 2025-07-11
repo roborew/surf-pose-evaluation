@@ -189,27 +189,72 @@ class PoseEvaluator:
 
         # Start MLflow run
         with mlflow.start_run(run_name=f"{model_name}_evaluation"):
-            # Log model parameters
-            mlflow.log_params(model_config)
+            # Log model parameters (safely handle long strings)
+            safe_config = self._sanitize_mlflow_params(model_config)
+            mlflow.log_params(safe_config)
             mlflow.log_param("model_name", model_name)
             mlflow.log_param("device", self.device)
             mlflow.log_param("num_clips", len(clips))
+
+            print(f"\n🔄 Starting evaluation of {model_name}")
+            print(f"   • Device: {self.device}")
+            print(f"   • Clips to process: {len(clips)}")
+            print(
+                f"   • Model complexity: {safe_config.get('model_complexity', 'N/A')}"
+            )
+            print(f"   • MLflow run: {mlflow.active_run().info.run_id[:8]}...")
+            print("   " + "=" * 50)
 
             # Evaluation metrics
             all_pose_metrics = []
             all_performance_metrics = []
 
-            # Process clips
-            for clip in tqdm(clips, desc=f"Processing {model_name}"):
+            # Process clips with enhanced progress tracking
+            print(f"\n📹 Processing video clips...")
+            successful_clips = 0
+            failed_clips = 0
+
+            for i, clip in enumerate(
+                tqdm(
+                    clips,
+                    desc=f"🎯 {model_name}",
+                    bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+                )
+            ):
                 try:
                     # Process video
+                    print(
+                        f"   Processing clip {i+1}/{len(clips)}: {getattr(clip, 'clip_path', 'Unknown')}",
+                        end="",
+                        flush=True,
+                    )
+
                     clip_metrics = self._process_video_clip(model, clip)
                     all_pose_metrics.append(clip_metrics["pose"])
                     all_performance_metrics.append(clip_metrics["performance"])
 
+                    successful_clips += 1
+                    print(f" ✅ ({clip_metrics['performance']['fps']:.1f} FPS)")
+
                 except Exception as e:
-                    logging.error(f"Error processing clip {clip.clip_path}: {e}")
+                    failed_clips += 1
+                    print(f" ❌ Error: {str(e)[:50]}...")
+                    logging.error(
+                        f"Error processing clip {getattr(clip, 'clip_path', 'Unknown')}: {e}"
+                    )
                     continue
+
+            # Processing summary
+            print(f"\n📊 Processing Summary for {model_name}:")
+            print(
+                f"   • Successful clips: {successful_clips}/{len(clips)} ({100*successful_clips/len(clips):.1f}%)"
+            )
+            if failed_clips > 0:
+                print(f"   • Failed clips: {failed_clips}")
+            if all_performance_metrics:
+                avg_fps = np.mean([m["fps"] for m in all_performance_metrics])
+                print(f"   • Average FPS: {avg_fps:.1f}")
+            print("   " + "=" * 50)
 
             # Aggregate results
             aggregated_metrics = self._aggregate_metrics(
@@ -227,6 +272,52 @@ class PoseEvaluator:
 
             return aggregated_metrics
 
+    def _sanitize_mlflow_params(self, config: Dict, max_length: int = 500) -> Dict:
+        """Sanitize configuration parameters for MLflow logging
+
+        Args:
+            config: Configuration dictionary
+            max_length: Maximum string length for MLflow parameters
+
+        Returns:
+            Sanitized configuration dictionary
+        """
+        sanitized = {}
+
+        def sanitize_value(value):
+            if isinstance(value, str):
+                if len(value) > max_length:
+                    return value[: max_length - 3] + "..."
+                return value
+            elif isinstance(value, (list, tuple)):
+                # Convert list to string representation
+                list_str = str(value)
+                if len(list_str) > max_length:
+                    return list_str[: max_length - 3] + "..."
+                return list_str
+            else:
+                # Convert other types to string
+                str_value = str(value)
+                if len(str_value) > max_length:
+                    return str_value[: max_length - 3] + "..."
+                return str_value
+
+        def flatten_dict(d, parent_key="", sep="_"):
+            """Flatten nested dictionary with separator"""
+            items = []
+            for k, v in d.items():
+                new_key = f"{parent_key}{sep}{k}" if parent_key else k
+                if isinstance(v, dict):
+                    items.extend(flatten_dict(v, new_key, sep=sep).items())
+                else:
+                    items.append((new_key, sanitize_value(v)))
+            return dict(items)
+
+        # Flatten and sanitize the config
+        sanitized = flatten_dict(config)
+
+        return sanitized
+
     def _process_video_clip(self, model: BasePoseModel, clip) -> Dict:
         """Process a single video clip with pose estimation"""
 
@@ -239,7 +330,17 @@ class PoseEvaluator:
 
         # Process frames
         pose_results = []
-        for frame in frames:
+        total_frames = len(frames)
+
+        for i, frame in enumerate(frames):
+            # Show frame progress (update every 5 frames)
+            if i % 5 == 0 or i == total_frames - 1:
+                print(
+                    f"\r      Frame {i+1}/{total_frames} [{100*(i+1)//total_frames:3d}%]",
+                    end="",
+                    flush=True,
+                )
+
             # Measure inference time
             start_time = time.time()
 
