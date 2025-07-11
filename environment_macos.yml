@@ -41,8 +41,8 @@ dependencies:
       - mlflow==2.5.0
       - optuna==3.2.0
 
-      # MediaPipe (excellent performance on Apple Silicon)
-      - mediapipe==0.10.11
+      # MediaPipe (use more stable version for Apple Silicon)
+      - mediapipe==0.10.8
 
       # YOLOv8 (supports Apple Silicon MPS)
       - ultralytics==8.0.134

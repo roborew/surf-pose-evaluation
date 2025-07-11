@@ -1,0 +1,82 @@
+# YOLOv8-Pose Model Configuration
+
+model_name: "yolov8_pose"
+model_type: "pose_estimation"
+
+# Model parameters
+model_size: "n" # n (nano), s (small), m (medium), l (large), x (extra-large)
+input_size: [640, 640]
+confidence_threshold: 0.25
+iou_threshold: 0.45
+max_detections: 300
+
+# Performance settings
+half_precision: false # Use FP16 for faster inference
+device_specific_optimization: true
+
+# Pose-specific settings
+keypoint_threshold: 0.3
+max_persons: 10
+
+# Training/fine-tuning parameters (if applicable)
+pretrained_weights: "yolov8n-pose.pt"
+num_classes: 1 # person class only
+num_keypoints: 17 # COCO format
+
+# Augmentation settings (for training)
+augmentation:
+  enabled: false
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  degrees: 0.0
+  translate: 0.1
+  scale: 0.5
+  shear: 0.0
+  perspective: 0.0
+  flipud: 0.0
+  fliplr: 0.5
+  mosaic: 1.0
+  mixup: 0.0
+
+# Optimization settings
+optimization:
+  optimizer: "SGD"
+  lr0: 0.01
+  lrf: 0.1
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 3.0
+  warmup_momentum: 0.8
+  warmup_bias_lr: 0.1
+
+# Model architecture settings
+architecture:
+  depth_multiple: 0.33 # model depth multiple
+  width_multiple: 0.25 # layer channel multiple
+  backbone: "YOLOv8"
+  head: "Pose"
+
+# Input/Output settings
+input_format: "BGR"
+output_format: "yolo_pose"
+normalize: true
+mean: [0.0, 0.0, 0.0]
+std: [255.0, 255.0, 255.0]
+
+# Performance expectations
+expected_performance:
+  inference_time_ms: 25 # On RTX 4090
+  memory_usage_mb: 100
+  accuracy_pck: 0.85
+
+# Compatibility
+supports_batch_processing: true
+supports_video_streaming: true
+supports_gpu_acceleration: true
+minimum_python_version: "3.8"
+dependencies:
+  - "ultralytics>=8.0.0"
+  - "torch>=1.7.0"
+  - "torchvision>=0.8.0"
+  - "opencv-python>=4.5.0"

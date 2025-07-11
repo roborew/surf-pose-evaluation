@@ -552,6 +552,38 @@ class SurfingDataLoader:
         logger.info(f"Selected {len(filtered_clips)} clips for evaluation")
         return filtered_clips
 
+    def load_clips(self, max_clips: Optional[int] = None, split: str = "test", 
+                   video_format: str = "h264") -> List[VideoClip]:
+        """
+        Load clips for evaluation - convenience method for the evaluation script.
+        
+        Args:
+            max_clips: Maximum number of clips to load
+            split: Data split to use ("train", "val", "test")
+            video_format: Video format to use ("h264" or "ffv1")
+            
+        Returns:
+            List of VideoClip objects ready for evaluation
+        """
+        # Initialize if not already done
+        if not self.all_clips:
+            logger.info("Loading annotations...")
+            self.load_annotations()
+            
+            logger.info(f"Discovering {video_format} video clips...")
+            self.all_clips = self.discover_video_clips(video_format)
+            
+            logger.info("Creating data splits...")
+            self.create_data_splits()
+        
+        # Get clips for evaluation
+        clips = self.get_evaluation_subset(
+            split=split,
+            max_clips=max_clips
+        )
+        
+        return clips
+
     def load_video_frames(
         self, clip: VideoClip, start_frame: int = 0, end_frame: Optional[int] = None
     ) -> np.ndarray:

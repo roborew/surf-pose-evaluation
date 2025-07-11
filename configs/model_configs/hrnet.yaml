@@ -1,0 +1,177 @@
+# HRNet Model Configuration
+
+model_name: "hrnet"
+model_type: "pose_estimation"
+
+# Model parameters
+model_variant: "hrnet_w48" # hrnet_w32, hrnet_w48
+input_size: [256, 192] # [height, width]
+output_stride: 4
+num_joints: 17 # COCO format
+
+# Model architecture
+architecture:
+  backbone: "HRNet"
+  head: "TopdownHeatmapSimpleHead"
+  neck: null
+
+# HRNet specific settings
+hrnet_config:
+  stage1:
+    num_modules: 1
+    num_branches: 1
+    block: "BOTTLENECK"
+    num_blocks: [4]
+    num_channels: [64]
+    fuse_method: "SUM"
+  stage2:
+    num_modules: 1
+    num_branches: 2
+    block: "BASIC"
+    num_blocks: [4, 4]
+    num_channels: [48, 96]
+    fuse_method: "SUM"
+  stage3:
+    num_modules: 4
+    num_branches: 3
+    block: "BASIC"
+    num_blocks: [4, 4, 4]
+    num_channels: [48, 96, 192]
+    fuse_method: "SUM"
+  stage4:
+    num_modules: 3
+    num_branches: 4
+    block: "BASIC"
+    num_blocks: [4, 4, 4, 4]
+    num_channels: [48, 96, 192, 384]
+    fuse_method: "SUM"
+
+# Head configuration
+head_config:
+  in_channels: 48
+  out_channels: 17
+  num_deconv_layers: 0
+  num_deconv_filters: []
+  num_deconv_kernels: []
+  extra:
+    final_conv_kernel: 1
+
+# Loss configuration
+loss_config:
+  type: "JointsMSELoss"
+  use_target_weight: true
+  loss_weight: 1.0
+
+# Post-processing
+postprocess:
+  use_udp: false # Unbiased Data Processing
+  target_type: "GaussianHeatmap"
+  heatmap_size: [64, 48] # output heatmap size
+  sigma: 2 # Gaussian kernel sigma
+  unbiased_encoding: false
+  keypoint_threshold: 0.3
+
+# Data preprocessing
+preprocessing:
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+  normalize: true
+  color_space: "RGB"
+
+# Detection settings (for top-down approach)
+detection:
+  bbox_threshold: 0.3
+  bbox_format: "xyxy"
+  use_gt_bbox: false
+  bbox_file: null
+
+# Training parameters (if applicable)
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  num_epochs: 210
+  optimizer: "Adam"
+  lr_scheduler: "MultiStepLR"
+  lr_decay_epochs: [170, 200]
+  lr_decay_factor: 0.1
+  weight_decay: 0.0001
+
+# Augmentation
+augmentation:
+  rotation_factor: 45
+  scale_factor: 0.35
+  flip_prob: 0.5
+  color_jitter: true
+  random_erasing: false
+
+# Model checkpoints
+checkpoints:
+  pretrained: "hrnet_w48_coco_256x192.pth"
+  load_from: null
+  resume_from: null
+
+# Performance expectations
+expected_performance:
+  inference_time_ms: 45 # On RTX 4090
+  memory_usage_mb: 200
+  accuracy_pck: 0.90
+  accuracy_ap: 0.75
+
+# Compatibility
+supports_batch_processing: true
+supports_multi_scale: true
+supports_flip_test: true
+minimum_python_version: "3.7"
+dependencies:
+  - "torch>=1.7.0"
+  - "torchvision>=0.8.0"
+  - "mmcv-full>=1.3.0"
+  - "mmpose>=0.29.0"
+  - "opencv-python>=4.5.0"
+
+# Dataset configuration
+dataset_info:
+  dataset_name: "COCO"
+  paper_info:
+    author: "Xiao, Bin and Wu, Haiping and Wei, Yichen"
+    title: "Simple baselines for human pose estimation and tracking"
+    container: "Proceedings of the European conference on computer vision (ECCV)"
+    year: "2018"
+  keypoint_info:
+    0: ["nose", "upper", [51, 153, 255]]
+    1: ["left_eye", "upper", [51, 153, 255]]
+    2: ["right_eye", "upper", [51, 153, 255]]
+    3: ["left_ear", "upper", [51, 153, 255]]
+    4: ["right_ear", "upper", [51, 153, 255]]
+    5: ["left_shoulder", "upper", [0, 255, 0]]
+    6: ["right_shoulder", "upper", [255, 128, 0]]
+    7: ["left_elbow", "upper", [0, 255, 0]]
+    8: ["right_elbow", "upper", [255, 128, 0]]
+    9: ["left_wrist", "upper", [0, 255, 0]]
+    10: ["right_wrist", "upper", [255, 128, 0]]
+    11: ["left_hip", "lower", [0, 255, 0]]
+    12: ["right_hip", "lower", [255, 128, 0]]
+    13: ["left_knee", "lower", [0, 255, 0]]
+    14: ["right_knee", "lower", [255, 128, 0]]
+    15: ["left_ankle", "lower", [0, 255, 0]]
+    16: ["right_ankle", "lower", [255, 128, 0]]
+  skeleton_info:
+    - [16, 14]
+    - [14, 12]
+    - [17, 15]
+    - [15, 13]
+    - [12, 13]
+    - [6, 12]
+    - [7, 13]
+    - [6, 7]
+    - [6, 8]
+    - [7, 9]
+    - [8, 10]
+    - [9, 11]
+    - [2, 3]
+    - [1, 2]
+    - [1, 3]
+    - [2, 4]
+    - [3, 5]
+    - [4, 6]
+    - [5, 7]
