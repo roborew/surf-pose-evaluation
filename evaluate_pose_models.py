@@ -39,6 +39,11 @@ from metrics.performance_metrics import PerformanceMetrics
 from utils.mlflow_utils import MLflowManager
 from utils.visualization import VisualizationUtils
 from utils.pose_video_visualizer import PoseVideoVisualizer
+from utils.prediction_file_format import (
+    PredictionFileHandler,
+    get_keypoint_format_for_model,
+    get_keypoint_names_for_model,
+)
 
 # Import other model wrappers when available
 try:
@@ -84,6 +89,23 @@ class PoseEvaluator:
             self.config.get("output", {}).get("visualization", {}).get("encoding", {})
         )
         self.video_visualizer = PoseVideoVisualizer(encoding_config)
+
+        # Initialize prediction file handler
+        prediction_config = self.config.get("output", {}).get("predictions", {})
+        if prediction_config.get("enabled", True):
+            # Use shared storage if configured, otherwise use local path
+            shared_storage_path = prediction_config.get("shared_storage_path")
+            if shared_storage_path:
+                prediction_base_path = shared_storage_path
+                logging.info(f"Using shared prediction storage: {prediction_base_path}")
+            else:
+                prediction_base_path = prediction_config.get("base_path", "predictions")
+                logging.info(f"Using local prediction storage: {prediction_base_path}")
+
+            self.prediction_handler = PredictionFileHandler(prediction_base_path)
+        else:
+            self.prediction_handler = None
+            logging.info("Prediction file generation disabled")
 
         # Model registry
         self.model_registry = self._setup_model_registry()
@@ -311,7 +333,9 @@ USAGE RECOMMENDATIONS:
                         flush=True,
                     )
 
-                    maneuver_metrics = self._process_video_maneuver(model, maneuver)
+                    maneuver_metrics = self._process_video_maneuver(
+                        model, maneuver, model_name
+                    )
                     all_pose_metrics.append(maneuver_metrics["pose"])
                     all_performance_metrics.append(maneuver_metrics["performance"])
 
@@ -466,8 +490,14 @@ USAGE RECOMMENDATIONS:
 
         return {"pose": pose_metrics, "performance": performance_metrics}
 
-    def _process_video_maneuver(self, model: BasePoseModel, maneuver) -> Dict:
-        """Process a single maneuver with pose estimation"""
+    def _process_video_maneuver(
+        self,
+        model: BasePoseModel,
+        maneuver,
+        model_name: str = None,
+        generate_predictions: bool = True,
+    ) -> Dict:
+        """Process a single maneuver with pose estimation and optionally generate prediction files"""
         from data_handling.data_loader import Maneuver
 
         # Load frames for this specific maneuver
@@ -505,6 +535,75 @@ USAGE RECOMMENDATIONS:
                 memory_usage.append(torch.cuda.memory_allocated())
 
             pose_results.append(pose_result)
+
+        # Generate standardized prediction file if requested
+        if generate_predictions and model_name and self.prediction_handler:
+            try:
+                print(
+                    f"\n    📁 Generating prediction file for {maneuver.maneuver_id}..."
+                )
+
+                # Get model-specific keypoint format
+                keypoint_format = get_keypoint_format_for_model(model_name)
+                keypoint_names = get_keypoint_names_for_model(model_name)
+
+                # Get model configuration
+                model_config = {}
+                if hasattr(model, "model_config"):
+                    model_config = model.model_config
+                elif hasattr(model, "get_model_info"):
+                    model_config = model.get_model_info()
+
+                # Convert pose results to standardized format
+                frame_predictions = []
+                for frame_idx, pose_result in enumerate(pose_results):
+                    frame_prediction = (
+                        self.prediction_handler.convert_model_prediction_to_standard(
+                            model_result=pose_result,
+                            frame_id=frame_idx,
+                            absolute_frame_id=maneuver.start_frame + frame_idx,
+                            timestamp=(maneuver.start_frame + frame_idx) / maneuver.fps,
+                            keypoint_format=keypoint_format,
+                            keypoint_names=keypoint_names,
+                        )
+                    )
+                    frame_predictions.append(frame_prediction)
+
+                # Create complete maneuver prediction
+                maneuver_prediction = (
+                    self.prediction_handler.create_maneuver_prediction(
+                        maneuver=maneuver,
+                        model_name=model_name,
+                        model_config=model_config,
+                        keypoint_format=keypoint_format,
+                        keypoint_names=keypoint_names,
+                        frame_predictions=frame_predictions,
+                    )
+                )
+
+                # Save prediction file
+                prediction_file_path = self.prediction_handler.save_prediction_file(
+                    maneuver_prediction
+                )
+                print(
+                    f"    ✅ Saved prediction file: {Path(prediction_file_path).name}"
+                )
+                logging.info(f"Saved prediction file: {prediction_file_path}")
+
+            except Exception as e:
+                print(f"    ❌ Failed to generate prediction file: {e}")
+                logging.error(
+                    f"Failed to generate prediction file for {maneuver.maneuver_id}: {e}"
+                )
+                import traceback
+
+                traceback.print_exc()
+        elif generate_predictions and model_name and not self.prediction_handler:
+            print(
+                f"    ⚠️ Prediction generation requested but no prediction handler available"
+            )
+        elif generate_predictions and not model_name:
+            print(f"    ⚠️ Prediction generation requested but no model name provided")
 
         # Calculate pose metrics (if ground truth available)
         pose_metrics = {}
@@ -552,8 +651,9 @@ USAGE RECOMMENDATIONS:
                     aggregated[f"perf_{key}_mean"] = np.mean(numeric_values)
                     aggregated[f"perf_{key}_std"] = np.std(numeric_values)
                 else:
-                    # For non-numeric values, just take the first one
-                    aggregated[f"perf_{key}_first"] = values[0]
+                    # For non-numeric values, just take the first one but don't log to MLflow
+                    # (MLflow only accepts numeric values for metrics)
+                    pass
 
         return aggregated
 
@@ -634,7 +734,9 @@ INTERPRETATION:
 
                 for i, maneuver in enumerate(subset_maneuvers):
                     try:
-                        maneuver_metrics = self._process_video_maneuver(model, maneuver)
+                        maneuver_metrics = self._process_video_maneuver(
+                            model, maneuver, model_name, generate_predictions=False
+                        )
                         if maneuver_metrics["pose"]:
                             pck_score = maneuver_metrics["pose"].get("pck_0_2", 0)
                             trial_metrics.append(pck_score)
@@ -995,7 +1097,9 @@ USAGE RECOMMENDATIONS:
 
         for i, maneuver in enumerate(maneuvers):
             try:
-                maneuver_metrics = self._process_video_maneuver(model, maneuver)
+                maneuver_metrics = self._process_video_maneuver(
+                    model, maneuver, model_name
+                )
 
                 if maneuver_metrics["pose"]:
                     all_pose_metrics.append(maneuver_metrics["pose"])
@@ -1094,27 +1198,155 @@ USAGE RECOMMENDATIONS:
             # Process each maneuver for visualization
             for maneuver_idx, maneuver in enumerate(maneuvers[:max_maneuvers]):
                 try:
-                    # Generate pose results for all frames of this maneuver
+                    # Load existing prediction file instead of running inference again
                     logging.info(
                         f"  Processing maneuver {maneuver_idx + 1}/{max_maneuvers}: {maneuver.maneuver_type} ({maneuver.duration:.1f}s)"
                     )
 
-                    # Load video frames for this specific maneuver
-                    frames = self.data_loader.load_video_frames(maneuver)
+                    # Try to load existing prediction file
                     pose_results = []
+                    prediction_file_path = None
 
-                    # Run pose estimation on all frames
-                    for frame_idx, frame in enumerate(frames):
-                        if frame_idx % 10 == 0:  # Progress update
-                            logging.info(f"    Frame {frame_idx + 1}/{len(frames)}")
+                    if self.prediction_handler:
+                        try:
+                            # Strip any suffix like "_best" from model name for prediction file lookup
+                            base_model_name = model_name.replace("_best", "").replace(
+                                "_optimized", ""
+                            )
 
-                        pose_result = model.predict(frame)
-                        pose_results.append(pose_result)
+                            # Look for existing prediction file
+                            prediction_file_path = (
+                                self.prediction_handler.get_prediction_file_path(
+                                    base_model_name, maneuver.maneuver_id
+                                )
+                            )
+
+                            print(
+                                f"    🔍 Looking for prediction file: {Path(prediction_file_path).name}"
+                            )
+                            print(f"    📂 Full path: {prediction_file_path}")
+                            print(
+                                f"    📁 Directory exists: {Path(prediction_file_path).parent.exists()}"
+                            )
+                            print(
+                                f"    📄 File exists: {Path(prediction_file_path).exists()}"
+                            )
+
+                            if Path(prediction_file_path).exists():
+                                logging.info(
+                                    f"    📂 Loading existing prediction file: {Path(prediction_file_path).name}"
+                                )
+                                maneuver_prediction = (
+                                    self.prediction_handler.load_prediction_file(
+                                        prediction_file_path
+                                    )
+                                )
+
+                                # Convert standardized format back to pose_results for visualization
+                                for frame_pred in maneuver_prediction.frames:
+                                    if frame_pred.persons:
+                                        # Extract keypoints, scores, and bboxes per person
+                                        keypoints_list = []
+                                        scores_list = []
+                                        bbox_list = []
+
+                                        for person in frame_pred.persons:
+                                            # Extract keypoints (x, y, z) or (x, y)
+                                            person_keypoints = []
+                                            person_scores = []
+
+                                            for kp in person.keypoints:
+                                                if kp.z is not None:
+                                                    person_keypoints.append(
+                                                        [kp.x, kp.y, kp.z]
+                                                    )
+                                                else:
+                                                    person_keypoints.append(
+                                                        [kp.x, kp.y]
+                                                    )
+                                                person_scores.append(kp.confidence)
+
+                                            keypoints_list.append(person_keypoints)
+                                            scores_list.append(person_scores)
+                                            bbox_list.append(person.bbox)
+
+                                        pose_result = {
+                                            "keypoints": np.array(keypoints_list),
+                                            "scores": np.array(scores_list),
+                                            "bbox": np.array(bbox_list),
+                                            "num_persons": len(frame_pred.persons),
+                                            "metadata": {
+                                                "model": model_name,
+                                                "inference_time": frame_pred.inference_time,
+                                                "frame_id": frame_pred.frame_id,
+                                                "timestamp": frame_pred.timestamp,
+                                            },
+                                        }
+                                    else:
+                                        # No persons detected
+                                        pose_result = {
+                                            "keypoints": np.array([]).reshape(0, 17, 2),
+                                            "scores": np.array([]).reshape(0, 17),
+                                            "bbox": np.array([]).reshape(0, 4),
+                                            "num_persons": 0,
+                                            "metadata": {
+                                                "model": model_name,
+                                                "inference_time": frame_pred.inference_time,
+                                                "frame_id": frame_pred.frame_id,
+                                                "timestamp": frame_pred.timestamp,
+                                            },
+                                        }
+
+                                    pose_results.append(pose_result)
+
+                                logging.info(
+                                    f"    ✅ Loaded {len(pose_results)} frames from prediction file"
+                                )
+                            else:
+                                logging.info(
+                                    f"    ⚠️ No prediction file found, running inference..."
+                                )
+                                # Fall back to running inference
+                                frames = self.data_loader.load_video_frames(maneuver)
+                                for frame_idx, frame in enumerate(frames):
+                                    if frame_idx % 10 == 0:
+                                        logging.info(
+                                            f"    Frame {frame_idx + 1}/{len(frames)}"
+                                        )
+                                    pose_result = model.predict(frame)
+                                    pose_results.append(pose_result)
+
+                        except Exception as e:
+                            logging.warning(
+                                f"    ⚠️ Failed to load prediction file: {e}, running inference..."
+                            )
+                            # Fall back to running inference
+                            frames = self.data_loader.load_video_frames(maneuver)
+                            for frame_idx, frame in enumerate(frames):
+                                if frame_idx % 10 == 0:
+                                    logging.info(
+                                        f"    Frame {frame_idx + 1}/{len(frames)}"
+                                    )
+                                pose_result = model.predict(frame)
+                                pose_results.append(pose_result)
+                    else:
+                        # No prediction handler, run inference
+                        logging.info(
+                            f"    🔄 Running inference (no prediction handler)..."
+                        )
+                        frames = self.data_loader.load_video_frames(maneuver)
+                        for frame_idx, frame in enumerate(frames):
+                            if frame_idx % 10 == 0:
+                                logging.info(f"    Frame {frame_idx + 1}/{len(frames)}")
+                            pose_result = model.predict(frame)
+                            pose_results.append(pose_result)
 
                     # Create visualization video for this maneuver
+                    # Format execution score as 2-digit integer (e.g., 05, 10)
+                    execution_score_str = f"{int(maneuver.execution_score):02d}"
                     output_path = (
                         vis_dir
-                        / f"maneuver_{maneuver_idx + 1}_{maneuver.maneuver_type}_{Path(maneuver.file_path).stem}_poses.mp4"
+                        / f"maneuver_{maneuver.maneuver_type}_{execution_score_str}_{Path(maneuver.file_path).stem}_poses.mp4"
                     )
 
                     success = self.video_visualizer.create_pose_visualization_video(
@@ -1125,6 +1357,8 @@ USAGE RECOMMENDATIONS:
                         kpt_thr=0.3,
                         bbox_thr=0.3,
                         max_persons=2,
+                        maneuver_start_frame=maneuver.start_frame,
+                        maneuver_end_frame=maneuver.end_frame,
                     )
 
                     if success:
@@ -1141,8 +1375,16 @@ USAGE RECOMMENDATIONS:
                                 "maneuver_type": maneuver.maneuver_type,
                                 "maneuver_duration": maneuver.duration,
                                 "source_file": Path(maneuver.file_path).name,
-                                "output_file": output_path.name,
+                                "output_video": output_path.name,
+                                "prediction_file": (
+                                    Path(prediction_file_path).name
+                                    if prediction_file_path
+                                    else None
+                                ),
+                                "frames_processed": len(pose_results),
                                 "status": "success",
+                                "used_prediction_file": prediction_file_path is not None
+                                and Path(prediction_file_path).exists(),
                             }
                         )
                     else:
@@ -1157,7 +1399,9 @@ USAGE RECOMMENDATIONS:
                                 "maneuver_type": maneuver.maneuver_type,
                                 "maneuver_duration": maneuver.duration,
                                 "source_file": Path(maneuver.file_path).name,
-                                "output_file": None,
+                                "output_video": None,
+                                "prediction_file": None,
+                                "frames_processed": 0,
                                 "status": "failed",
                             }
                         )
@@ -1180,7 +1424,9 @@ USAGE RECOMMENDATIONS:
                                 if hasattr(maneuver, "file_path")
                                 else "unknown"
                             ),
-                            "output_file": None,
+                            "output_video": None,
+                            "prediction_file": None,
+                            "frames_processed": 0,
                             "status": "error",
                             "error_message": str(e),
                         }

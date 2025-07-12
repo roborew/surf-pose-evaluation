@@ -68,8 +68,8 @@ class VideoClip:
             maneuver = Maneuver(
                 clip=self,
                 maneuver_id=f"{self.video_id}_maneuver_{i}",
-                maneuver_type=annotation["labels"][0],
-                execution_score=annotation["labels"][1],
+                maneuver_type=annotation["labels"][1],  # Maneuver type (e.g., "Pop-up")
+                execution_score=annotation["labels"][0],  # Execution score (e.g., "09")
                 start_time=annotation["start"],
                 end_time=annotation["end"],
                 start_frame=int(annotation["start"] * self.fps),

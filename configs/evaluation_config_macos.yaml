@@ -177,6 +177,15 @@ output:
   # Results directory
   results_dir: "./results"
 
+  # Prediction file storage
+  predictions:
+    enabled: true
+    base_path: "predictions" # Relative to results_dir
+    shared_storage_path: "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/predictions"
+    format: "json" # Standardized JSON format
+    include_metadata: true
+    compress: false # Set to true for large datasets
+
   # Visualization settings
   visualization:
     enabled: true

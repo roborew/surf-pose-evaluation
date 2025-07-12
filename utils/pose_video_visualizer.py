@@ -182,6 +182,10 @@ class PoseVideoVisualizer:
         kpt_thr: float = 0.3,
         bbox_thr: float = 0.3,
         max_persons: int = 3,
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        maneuver_start_frame: Optional[int] = None,
+        maneuver_end_frame: Optional[int] = None,
     ) -> bool:
         """Create high-quality pose visualization video
 
@@ -193,6 +197,10 @@ class PoseVideoVisualizer:
             kpt_thr: Keypoint confidence threshold
             bbox_thr: Bounding box confidence threshold
             max_persons: Maximum number of persons to visualize
+            start_frame: Starting frame index (relative to video)
+            end_frame: Ending frame index (relative to video)
+            maneuver_start_frame: Starting frame of maneuver (absolute frame index)
+            maneuver_end_frame: Ending frame of maneuver (absolute frame index)
 
         Returns:
             Success status
@@ -210,51 +218,79 @@ class PoseVideoVisualizer:
             fps = cap.get(cv2.CAP_PROP_FPS)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-            logger.info(
-                f"Creating visualization: {width}x{height} @ {fps:.2f} FPS, {total_frames} frames"
-            )
+            # Determine frame range to process
+            if maneuver_start_frame is not None and maneuver_end_frame is not None:
+                # Use maneuver frame range
+                actual_start_frame = maneuver_start_frame
+                actual_end_frame = maneuver_end_frame
+                frames_to_process = actual_end_frame - actual_start_frame
+                logger.info(
+                    f"Creating maneuver visualization: {width}x{height} @ {fps:.2f} FPS, "
+                    f"frames {actual_start_frame}-{actual_end_frame} ({frames_to_process} frames)"
+                )
+            else:
+                # Use provided range or full video
+                actual_start_frame = start_frame
+                actual_end_frame = end_frame if end_frame is not None else total_frames
+                frames_to_process = actual_end_frame - actual_start_frame
+                logger.info(
+                    f"Creating visualization: {width}x{height} @ {fps:.2f} FPS, "
+                    f"frames {actual_start_frame}-{actual_end_frame} ({frames_to_process} frames)"
+                )
 
             # Create temp directory for frames
             temp_dir = Path(output_path).parent / "temp_vis_frames"
             temp_dir.mkdir(exist_ok=True)
 
-            # Process frames
-            frame_idx = 0
-            annotated_frames = 0
+            # Skip to start frame if needed
+            if actual_start_frame > 0:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, actual_start_frame)
 
-            while True:
+            # Process frames
+            frame_idx = actual_start_frame
+            pose_result_idx = 0  # Index into pose_results array
+            annotated_frames = 0
+            output_frame_idx = 0  # Index for output frame naming
+
+            while frame_idx < actual_end_frame:
                 ret, frame = cap.read()
                 if not ret:
                     break
 
                 # Get pose results for this frame
                 frame_annotated = False
-                if frame_idx < len(pose_results):
-                    pose_result = pose_results[frame_idx]
+                if pose_result_idx < len(pose_results):
+                    pose_result = pose_results[pose_result_idx]
                     frame_annotated = self._draw_poses_on_frame(
                         frame, pose_result, kpt_thr, bbox_thr, max_persons
                     )
 
                 # Add model name and frame info
-                self._add_frame_info(frame, model_name, frame_idx, total_frames)
+                self._add_frame_info(
+                    frame, model_name, output_frame_idx, frames_to_process
+                )
 
                 # Save frame
-                frame_path = temp_dir / f"frame_{frame_idx:06d}.png"
+                frame_path = temp_dir / f"frame_{output_frame_idx:06d}.png"
                 cv2.imwrite(str(frame_path), frame)
 
                 if frame_annotated:
                     annotated_frames += 1
 
                 frame_idx += 1
+                pose_result_idx += 1
+                output_frame_idx += 1
 
                 # Progress update
-                if frame_idx % 50 == 0:
-                    logger.info(f"  Processed {frame_idx}/{total_frames} frames")
+                if output_frame_idx % 50 == 0:
+                    logger.info(
+                        f"  Processed {output_frame_idx}/{frames_to_process} frames"
+                    )
 
             cap.release()
 
             logger.info(
-                f"Processed {frame_idx} frames, {annotated_frames} with annotations"
+                f"Processed {output_frame_idx} frames, {annotated_frames} with annotations"
             )
 
             # Create video from frames
