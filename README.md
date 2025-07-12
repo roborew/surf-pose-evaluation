@@ -27,6 +27,8 @@ This framework systematically compares pose estimation models to determine the o
 | **macOS Development** | Apple Silicon | MPS          | Development, testing, quick iterations |
 | **Linux Production**  | NVIDIA GPU    | CUDA         | Comprehensive evaluation, research     |
 
+> **⚠️ Linux Users**: The original `environment.yml` has dependency conflicts. Use `environment_linux.yml` instead. See [Linux Setup](#linux-setup-production) for details.
+
 #### macOS Setup (Development)
 
 ```bash
@@ -42,17 +44,72 @@ python -c "import torch; print(f'MPS available: {torch.backends.mps.is_available
 
 #### Linux Setup (Production)
 
-```bash
-# Try main environment first
-conda env create -f environment.yml
-conda activate surf_pose_eval
+**⚠️ Important**: The original `environment.yml` has dependency conflicts on Linux. Use the fixed versions below.
 
-# If conflicts, use fallback:
-# conda env create -f environment_simple.yml && pip install mmengine mmcv mmdet mmpose ultralytics
+##### Option 1: Fixed Linux Environment (Recommended)
+
+```bash
+# Remove old environment if it exists
+conda env remove -n surf_pose_eval
+
+# Use the Linux-compatible environment
+conda env create -f environment_linux.yml
+conda activate surf_pose_eval
 
 # Verify installation
 python test_zoom_loading.py
 python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+python -c "import cv2; print(f'OpenCV version: {cv2.__version__}')"
+```
+
+**Key fixes in `environment_linux.yml`:**
+
+- ✅ Python 3.10 for better compatibility
+- ✅ OpenCV via pip to avoid JPEG conflicts
+- ✅ All pose estimation libraries included
+- ✅ CUDA 11.8 support maintained
+
+##### Option 2: Minimal Environment (Fallback)
+
+If you still encounter conflicts:
+
+```bash
+# Create minimal environment
+conda env create -f environment_linux_minimal.yml
+conda activate surf_pose_eval
+
+# Install additional packages as needed
+pip install mmengine==0.8.4 mmcv==2.0.1 mmdet==3.1.0 mmpose==1.1.0
+pip install xtcocotools==1.14.1 timm==0.9.2 decord==0.6.0
+```
+
+##### Option 3: Troubleshooting Common Issues
+
+**CUDA Not Available:**
+
+```bash
+nvidia-smi  # Check drivers
+python -c "import torch; print(torch.version.cuda)"
+```
+
+**OpenCV Import Errors:**
+
+```bash
+pip uninstall opencv-python opencv-contrib-python
+pip install opencv-python==4.8.0.76
+```
+
+**MMPose Installation Fails:**
+
+```bash
+pip install openmim
+mim install mmengine "mmcv>=2.0.1" "mmdet>=3.1.0" "mmpose>=1.1.0"
+```
+
+**Memory Issues:**
+
+```bash
+export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 ```
 
 **Capabilities:** ✅ All models ✅ CUDA acceleration ✅ Large batches ✅ FFV1 lossless video
@@ -491,6 +548,62 @@ Each model has dedicated configuration files in `configs/model_configs/`:
 - `yolov8_pose.yaml` - YOLOv8 model variants and thresholds
 - `mmpose.yaml` - MMPose backbone configurations
 - `pytorch_pose.yaml` - PyTorch KeypointRCNN settings
+
+## Linux Environment Troubleshooting
+
+### Understanding the Dependency Conflicts
+
+The original `environment.yml` encounters these issues on Linux:
+
+1. **PyTorch/torchvision/CUDA version mismatches**
+2. **OpenCV conflicts with JPEG libraries**
+3. **Python 3.9 compatibility issues**
+4. **Complex dependency chains causing solver failures**
+
+### Docker Alternative
+
+If conda continues to cause issues, use Docker:
+
+```bash
+# Create Dockerfile
+cat > Dockerfile << 'EOF'
+FROM pytorch/pytorch:2.0.1-cuda11.8-cudnn8-runtime
+
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 \
+    libxrender-dev libgomp1 git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+EOF
+
+# Build and run
+docker build -t surf-pose-eval .
+docker run --gpus all -it -v $(pwd):/workspace surf-pose-eval
+```
+
+### Performance Expectations (Linux GPU)
+
+With modern GPUs (RTX 3080/4080/4090):
+
+| Model       | FPS   | Memory Usage | Notes                |
+| ----------- | ----- | ------------ | -------------------- |
+| MediaPipe   | 30-60 | 2-4GB        | CPU-optimized        |
+| YOLOv8-Pose | 20-40 | 4-8GB        | Good GPU utilization |
+| MMPose      | 10-20 | 6-12GB       | Heavy but accurate   |
+| BlazePose   | 25-50 | 2-6GB        | Balanced performance |
+
+### Environment Files Overview
+
+| File                            | Purpose                  | Python | Use Case                |
+| ------------------------------- | ------------------------ | ------ | ----------------------- |
+| `environment.yml`               | Original (has conflicts) | 3.9    | ❌ Avoid on Linux       |
+| `environment_linux.yml`         | Fixed Linux version      | 3.10   | ✅ Recommended          |
+| `environment_linux_minimal.yml` | Minimal fallback         | 3.10   | ✅ If conflicts persist |
+| `environment_macos.yml`         | macOS optimized          | 3.9    | ✅ Apple Silicon        |
+| `environment_simple.yml`        | Legacy fallback          | 3.9    | ⚠️ Limited features     |
 
 ## Contributing
 
