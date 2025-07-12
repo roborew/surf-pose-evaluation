@@ -55,7 +55,7 @@ models:
     - "mediapipe" # Excellent on Apple Silicon
     - "blazepose" # Google's optimized real-time 3D pose estimation
     - "yolov8_pose" # YOLO pose estimation (supports MPS)
-    # Note: MMPose requires additional installation on macOS (includes HRNet backbones)
+    - "mmpose" # MMPose framework (includes HRNet backbones) - Fixed download issues
 
   # Model-specific settings
   default_settings:

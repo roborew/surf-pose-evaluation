@@ -33,6 +33,10 @@ class YOLOv8Wrapper(BasePoseModel):
                 "Ultralytics YOLO is not available. Install with: pip install ultralytics"
             )
 
+        # Disable Ultralytics telemetry/analytics to prevent Google Analytics calls
+        import os
+        os.environ['YOLO_SETTINGS'] = '{"sync": false}'
+
         super().__init__(device, **kwargs)
 
         # Model configuration

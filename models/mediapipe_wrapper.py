@@ -41,6 +41,18 @@ class MediaPipeWrapper(BasePoseModel):
 
     def load_model(self) -> None:
         """Load and initialize MediaPipe Pose model with robust error handling"""
+        # Force CPU-only TensorFlow Lite execution for Apple Silicon compatibility
+        import os
+
+        os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Suppress TF warnings
+        os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"  # Force CPU only
+        os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"  # Disable GPU memory growth
+
+        # Additional Apple Silicon compatibility settings
+        if "darwin" in os.uname().sysname.lower():
+            os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # Disable oneDNN optimizations
+            os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Reduce logging
+
         try:
             # First try with the configured parameters
             self.model = self._create_pose_model()
@@ -69,8 +81,19 @@ class MediaPipeWrapper(BasePoseModel):
 
     def _try_fallback_initialization(self) -> bool:
         """Try fallback initialization strategies for better macOS compatibility"""
+        import os
+
         fallback_configs = [
-            # Strategy 1: Disable segmentation and use simpler model
+            # Strategy 1: Ultra conservative - Lite model, static mode, high thresholds
+            {
+                "static_image_mode": True,
+                "model_complexity": 0,  # Lite model
+                "smooth_landmarks": False,
+                "enable_segmentation": False,
+                "min_detection_confidence": 0.8,
+                "min_tracking_confidence": 0.8,
+            },
+            # Strategy 2: Simplest possible configuration with lower thresholds
             {
                 "static_image_mode": True,
                 "model_complexity": 0,
@@ -79,22 +102,25 @@ class MediaPipeWrapper(BasePoseModel):
                 "min_detection_confidence": 0.5,
                 "min_tracking_confidence": 0.5,
             },
-            # Strategy 2: Use simplest possible configuration
+            # Strategy 3: Default MediaPipe configuration (minimal parameters)
             {
-                "static_image_mode": True,
-                "model_complexity": 0,
-                "smooth_landmarks": False,
-                "enable_segmentation": False,
-                "min_detection_confidence": 0.7,
-                "min_tracking_confidence": 0.7,
+                "static_image_mode": False,
+                "model_complexity": 1,
             },
-            # Strategy 3: Default configuration only
+            # Strategy 4: Absolute minimal configuration
             {},
         ]
 
         for i, config in enumerate(fallback_configs):
             try:
-                logging.info(f"Trying fallback initialization strategy {i+1}")
+                logging.info(f"Trying fallback initialization strategy {i+1}: {config}")
+
+                # Set additional environment variables for each attempt
+                os.environ["TF_DISABLE_MKL"] = "1" if i > 1 else "0"
+                os.environ["TF_DISABLE_SEGMENT_REDUCTION_OP_DETERMINISM_EXCEPTIONS"] = (
+                    "1"
+                )
+
                 # Update configuration
                 for key, value in config.items():
                     setattr(self, key, value)
@@ -105,14 +131,43 @@ class MediaPipeWrapper(BasePoseModel):
                 else:  # Use default configuration
                     self.model = self.mp_pose.Pose()
 
+                # Test the model with a dummy prediction to ensure it really works
+                dummy_image = np.zeros((256, 256, 3), dtype=np.uint8)
+                dummy_rgb = cv2.cvtColor(dummy_image, cv2.COLOR_BGR2RGB)
+                test_results = self.model.process(dummy_rgb)
+
                 self.is_initialized = True
-                logging.info(f"Fallback strategy {i+1} successful")
+                logging.info(f"Fallback strategy {i+1} successful and verified")
                 return True
+
             except Exception as e:
                 logging.warning(f"Fallback strategy {i+1} failed: {e}")
+                # Clean up any partial initialization
+                if hasattr(self, "model") and self.model:
+                    try:
+                        self.model.close()
+                    except:
+                        pass
+                    self.model = None
                 continue
 
-        return False
+        # If all fallback strategies fail, try one last desperate attempt with imported pose
+        try:
+            logging.info("Attempting emergency fallback with fresh import")
+            import importlib
+
+            importlib.reload(mp.solutions.pose)
+            self.mp_pose = mp.solutions.pose
+
+            self.model = self.mp_pose.Pose(
+                static_image_mode=True, model_complexity=0, enable_segmentation=False
+            )
+            self.is_initialized = True
+            logging.info("Emergency fallback successful")
+            return True
+        except Exception as e:
+            logging.error(f"Emergency fallback also failed: {e}")
+            return False
 
     def predict(self, image: np.ndarray) -> Dict[str, Any]:
         """Run MediaPipe pose estimation on image

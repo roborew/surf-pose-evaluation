@@ -1,4 +1,5 @@
 # YOLOv8-Pose Model Configuration
+# Note: Analytics/telemetry to Google Analytics is disabled in the wrapper
 
 model_name: "yolov8_pose"
 model_type: "pose_estimation"
