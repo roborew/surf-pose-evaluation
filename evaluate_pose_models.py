@@ -157,8 +157,11 @@ class PoseEvaluator:
         """Quick screening evaluation with limited data"""
         logging.info(f"Starting quick screening with {num_clips} clips")
 
-        # Load limited dataset
-        clips = self.data_loader.load_clips(max_clips=num_clips)
+        # Load limited dataset - use maneuvers instead of full clips
+        maneuvers = self.data_loader.load_maneuvers(
+            max_clips=num_clips, maneuvers_per_clip=1
+        )
+        logging.info(f"Loaded {len(maneuvers)} maneuvers for quick screening")
 
         results = {}
         for model_name in models:
@@ -167,7 +170,7 @@ class PoseEvaluator:
                 continue
 
             logging.info(f"Evaluating {model_name}")
-            model_results = self._evaluate_single_model(model_name, clips)
+            model_results = self._evaluate_single_model(model_name, maneuvers)
             results[model_name] = model_results
 
         return results
@@ -181,8 +184,9 @@ class PoseEvaluator:
         """Comprehensive evaluation with full dataset"""
         logging.info("Starting full evaluation")
 
-        # Load full dataset
-        clips = self.data_loader.load_clips(max_clips=num_clips)
+        # Load full dataset - use maneuvers instead of full clips
+        maneuvers = self.data_loader.load_maneuvers(max_clips=num_clips)
+        logging.info(f"Loaded {len(maneuvers)} maneuvers for full evaluation")
 
         results = {}
         for model_name in models:
@@ -193,15 +197,15 @@ class PoseEvaluator:
             logging.info(f"Evaluating {model_name}")
 
             if use_optuna:
-                model_results = self._evaluate_with_optimization(model_name, clips)
+                model_results = self._evaluate_with_optimization(model_name, maneuvers)
             else:
-                model_results = self._evaluate_single_model(model_name, clips)
+                model_results = self._evaluate_single_model(model_name, maneuvers)
 
             results[model_name] = model_results
 
         return results
 
-    def _evaluate_single_model(self, model_name: str, clips: List) -> Dict:
+    def _evaluate_single_model(self, model_name: str, maneuvers: List) -> Dict:
         """Evaluate a single pose estimation model"""
 
         # Load model configuration
@@ -231,7 +235,7 @@ class PoseEvaluator:
 STANDARD MODEL EVALUATION - Baseline Performance
 
 PURPOSE: Comprehensive evaluation using default/configured hyperparameters
-DATA SCOPE: Full dataset evaluation on {len(clips)} clips
+DATA SCOPE: Full dataset evaluation on {len(maneuvers)} maneuvers
 CONFIGURATION: Default parameters from model config file
 
 This is a standard evaluation run using the model's default or pre-configured
@@ -241,7 +245,7 @@ or when you have known-good parameters that don't require optimization.
 EVALUATION DETAILS:
 - Model: {model_name}
 - Configuration source: Model config file or defaults
-- Data coverage: Complete dataset ({len(clips)} clips)
+- Data coverage: Complete dataset ({len(maneuvers)} maneuvers)
 - Evaluation type: Comprehensive (all metrics computed)
 - Hyperparameter optimization: Not used
 
@@ -267,14 +271,16 @@ USAGE RECOMMENDATIONS:
             mlflow.log_params(safe_config)
             mlflow.log_param("model_name", model_name)
             mlflow.log_param("device", self.device)
-            mlflow.log_param("num_clips", len(clips))
+            mlflow.log_param("num_maneuvers", len(maneuvers))
             mlflow.log_param("optimization_mode", "standard_evaluation")
-            mlflow.log_param("data_scope", f"complete_dataset_{len(clips)}_clips")
+            mlflow.log_param(
+                "data_scope", f"complete_dataset_{len(maneuvers)}_maneuvers"
+            )
             mlflow.log_param("purpose", "baseline_evaluation")
 
             print(f"\n🔄 Starting evaluation of {model_name}")
             print(f"   • Device: {self.device}")
-            print(f"   • Clips to process: {len(clips)}")
+            print(f"   • Maneuvers to process: {len(maneuvers)}")
             print(
                 f"   • Model complexity: {safe_config.get('model_complexity', 'N/A')}"
             )
@@ -285,48 +291,48 @@ USAGE RECOMMENDATIONS:
             all_pose_metrics = []
             all_performance_metrics = []
 
-            # Process clips with enhanced progress tracking
-            print(f"\n📹 Processing video clips...")
-            successful_clips = 0
-            failed_clips = 0
+            # Process maneuvers with enhanced progress tracking
+            print(f"\n📹 Processing maneuvers...")
+            successful_maneuvers = 0
+            failed_maneuvers = 0
 
-            for i, clip in enumerate(
+            for i, maneuver in enumerate(
                 tqdm(
-                    clips,
+                    maneuvers,
                     desc=f"🎯 {model_name}",
                     bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
                 )
             ):
                 try:
-                    # Process video
+                    # Process maneuver
                     print(
-                        f"   Processing clip {i+1}/{len(clips)}: {getattr(clip, 'clip_path', 'Unknown')}",
+                        f"   Processing maneuver {i+1}/{len(maneuvers)}: {maneuver.maneuver_type} ({maneuver.duration:.1f}s)",
                         end="",
                         flush=True,
                     )
 
-                    clip_metrics = self._process_video_clip(model, clip)
-                    all_pose_metrics.append(clip_metrics["pose"])
-                    all_performance_metrics.append(clip_metrics["performance"])
+                    maneuver_metrics = self._process_video_maneuver(model, maneuver)
+                    all_pose_metrics.append(maneuver_metrics["pose"])
+                    all_performance_metrics.append(maneuver_metrics["performance"])
 
-                    successful_clips += 1
-                    print(f" ✅ ({clip_metrics['performance']['fps']:.1f} FPS)")
+                    successful_maneuvers += 1
+                    print(f" ✅ ({maneuver_metrics['performance']['fps']:.1f} FPS)")
 
                 except Exception as e:
-                    failed_clips += 1
+                    failed_maneuvers += 1
                     print(f" ❌ Error: {str(e)[:50]}...")
                     logging.error(
-                        f"Error processing clip {getattr(clip, 'clip_path', 'Unknown')}: {e}"
+                        f"Error processing maneuver {maneuver.maneuver_id}: {e}"
                     )
                     continue
 
             # Processing summary
             print(f"\n📊 Processing Summary for {model_name}:")
             print(
-                f"   • Successful clips: {successful_clips}/{len(clips)} ({100*successful_clips/len(clips):.1f}%)"
+                f"   • Successful maneuvers: {successful_maneuvers}/{len(maneuvers)} ({100*successful_maneuvers/len(maneuvers):.1f}%)"
             )
-            if failed_clips > 0:
-                print(f"   • Failed clips: {failed_clips}")
+            if failed_maneuvers > 0:
+                print(f"   • Failed maneuvers: {failed_maneuvers}")
             if all_performance_metrics:
                 avg_fps = np.mean([m["fps"] for m in all_performance_metrics])
                 print(f"   • Average FPS: {avg_fps:.1f}")
@@ -353,8 +359,8 @@ USAGE RECOMMENDATIONS:
                 .get("enabled", False)
             ):
                 self._create_sample_visualizations(
-                    model, model_name, clips[:3]
-                )  # Use first 3 clips
+                    model, model_name, maneuvers[:3]
+                )  # Use first 3 maneuvers
 
             return aggregated_metrics
 
@@ -460,6 +466,66 @@ USAGE RECOMMENDATIONS:
 
         return {"pose": pose_metrics, "performance": performance_metrics}
 
+    def _process_video_maneuver(self, model: BasePoseModel, maneuver) -> Dict:
+        """Process a single maneuver with pose estimation"""
+        from data_handling.data_loader import Maneuver
+
+        # Load frames for this specific maneuver
+        frames = self.data_loader.load_video_frames(maneuver)
+
+        # Performance tracking
+        inference_times = []
+        memory_usage = []
+
+        # Process frames
+        pose_results = []
+        total_frames = len(frames)
+
+        for i, frame in enumerate(frames):
+            # Show frame progress (update every 5 frames)
+            if i % 5 == 0 or i == total_frames - 1:
+                print(
+                    f"\r      Frame {i+1}/{total_frames} [{100*(i+1)//total_frames:3d}%]",
+                    end="",
+                    flush=True,
+                )
+
+            # Measure inference time
+            start_time = time.time()
+
+            # Run pose estimation
+            pose_result = model.predict(frame)
+
+            # Record performance
+            inference_time = time.time() - start_time
+            inference_times.append(inference_time)
+
+            # Record memory usage
+            if self.device == "cuda":
+                memory_usage.append(torch.cuda.memory_allocated())
+
+            pose_results.append(pose_result)
+
+        # Calculate pose metrics (if ground truth available)
+        pose_metrics = {}
+        if hasattr(maneuver, "annotation_data") and maneuver.annotation_data:
+            # For maneuvers, we have the ground truth annotation
+            pose_metrics = self.pose_metrics.calculate_metrics(
+                pose_results, [maneuver.annotation_data]
+            )
+
+        # Calculate performance metrics
+        performance_metrics = {
+            "avg_inference_time": np.mean(inference_times),
+            "fps": 1.0 / np.mean(inference_times),
+            "max_memory_usage": max(memory_usage) if memory_usage else 0,
+            "total_frames": len(frames),
+            "maneuver_type": maneuver.maneuver_type,
+            "maneuver_duration": maneuver.duration,
+        }
+
+        return {"pose": pose_metrics, "performance": performance_metrics}
+
     def _aggregate_metrics(
         self, pose_metrics: List[Dict], performance_metrics: List[Dict]
     ) -> Dict:
@@ -480,12 +546,18 @@ USAGE RECOMMENDATIONS:
         for key in perf_keys:
             values = [m[key] for m in performance_metrics if key in m]
             if values:
-                aggregated[f"perf_{key}_mean"] = np.mean(values)
-                aggregated[f"perf_{key}_std"] = np.std(values)
+                # Only aggregate numeric values
+                numeric_values = [v for v in values if isinstance(v, (int, float))]
+                if numeric_values:
+                    aggregated[f"perf_{key}_mean"] = np.mean(numeric_values)
+                    aggregated[f"perf_{key}_std"] = np.std(numeric_values)
+                else:
+                    # For non-numeric values, just take the first one
+                    aggregated[f"perf_{key}_first"] = values[0]
 
         return aggregated
 
-    def _evaluate_with_optimization(self, model_name: str, clips: List) -> Dict:
+    def _evaluate_with_optimization(self, model_name: str, maneuvers: List) -> Dict:
         """Evaluate model with Optuna hyperparameter optimization"""
         import optuna
         import numpy as np
@@ -513,7 +585,7 @@ USAGE RECOMMENDATIONS:
 OPTUNA TRIAL #{trial.number:03d} - Hyperparameter Exploration
 
 PURPOSE: Testing specific hyperparameter combination to find optimal settings
-DATA SCOPE: Quick evaluation on {min(20, len(clips))} clips (subset for speed)
+DATA SCOPE: Quick evaluation on {min(20, len(maneuvers))} maneuvers (subset for speed)
 PARAMETERS TESTED: {param_summary}
 
 This trial tests a specific combination of hyperparameters sampled by Optuna's TPE algorithm.
@@ -524,7 +596,7 @@ TRIAL DETAILS:
 - Model: {model_name}
 - Parameter combination: {config}
 - Optimization objective: Maximize PCK@0.2 (pose accuracy)
-- Data used: Subset of clips for fast iteration
+- Data used: Subset of maneuvers for fast iteration
 - Expected runtime: 1-3 minutes
 
 INTERPRETATION:
@@ -539,7 +611,9 @@ INTERPRETATION:
                 mlflow.log_param("model_name", model_name)
                 mlflow.log_param("trial_number", trial.number)
                 mlflow.log_param("optimization_mode", "optuna_trial")
-                mlflow.log_param("data_scope", f"subset_{min(20, len(clips))}_clips")
+                mlflow.log_param(
+                    "data_scope", f"subset_{min(20, len(maneuvers))}_maneuvers"
+                )
                 mlflow.log_param("purpose", "hyperparameter_exploration")
 
                 # Log sampled hyperparameters
@@ -551,31 +625,31 @@ INTERPRETATION:
                 model = model_class(device=self.device, **config)
 
                 # Quick evaluation on subset for optimization
-                subset_clips = clips[: min(20, len(clips))]
+                subset_maneuvers = maneuvers[: min(20, len(maneuvers))]
                 trial_metrics = []
                 trial_pose_metrics = []
                 trial_perf_metrics = []
 
                 print(f"\n🔄 Trial {trial.number:03d}: {param_summary}")
 
-                for i, clip in enumerate(subset_clips):
+                for i, maneuver in enumerate(subset_maneuvers):
                     try:
-                        clip_metrics = self._process_video_clip(model, clip)
-                        if clip_metrics["pose"]:
-                            pck_score = clip_metrics["pose"].get("pck_0_2", 0)
+                        maneuver_metrics = self._process_video_maneuver(model, maneuver)
+                        if maneuver_metrics["pose"]:
+                            pck_score = maneuver_metrics["pose"].get("pck_0_2", 0)
                             trial_metrics.append(pck_score)
-                            trial_pose_metrics.append(clip_metrics["pose"])
-                            trial_perf_metrics.append(clip_metrics["performance"])
+                            trial_pose_metrics.append(maneuver_metrics["pose"])
+                            trial_perf_metrics.append(maneuver_metrics["performance"])
 
                         # Progress indicator for trials
                         if (i + 1) % 5 == 0:
                             print(
-                                f"   • Processed {i + 1}/{len(subset_clips)} clips..."
+                                f"   • Processed {i + 1}/{len(subset_maneuvers)} maneuvers..."
                             )
 
                     except Exception as e:
                         logging.warning(
-                            f"Failed to process clip in trial {trial.number}: {e}"
+                            f"Failed to process maneuver in trial {trial.number}: {e}"
                         )
                         continue
 
@@ -594,7 +668,7 @@ INTERPRETATION:
 
                     # Log optimization-specific metrics
                     mlflow.log_metric("optuna_trial_score", trial_score)
-                    mlflow.log_metric("num_clips_processed", len(trial_metrics))
+                    mlflow.log_metric("num_maneuvers_processed", len(trial_metrics))
 
                     trial_result = {
                         "trial_number": trial.number,
@@ -755,7 +829,7 @@ INTERPRETATION:
 BEST CONFIGURATION FULL EVALUATION - Production Results
 
 PURPOSE: Complete performance evaluation using optimal hyperparameters
-DATA SCOPE: Full dataset evaluation on {len(clips)} clips (production-scale)
+DATA SCOPE: Full dataset evaluation on {len(maneuvers)} maneuvers (production-scale)
 OPTIMAL CONFIG: {best_config_summary} (from Trial #{best_trial_result['trial_number']})
 
 This is the PRODUCTION-READY evaluation using the best hyperparameters discovered
@@ -765,7 +839,7 @@ your complete dataset to provide accurate, deployment-ready performance metrics.
 EVALUATION DETAILS:
 - Model: {model_name}
 - Configuration source: Best performing trial from optimization
-- Data coverage: Complete dataset ({len(clips)} clips)
+- Data coverage: Complete dataset ({len(maneuvers)} maneuvers)
 - Evaluation type: Comprehensive (all metrics computed)
 - Expected runtime: 10-30 minutes depending on dataset size
 
@@ -791,7 +865,9 @@ USAGE RECOMMENDATIONS:
 
                 mlflow.log_param("model_name", model_name)
                 mlflow.log_param("optimization_mode", "best_full_evaluation")
-                mlflow.log_param("data_scope", f"complete_dataset_{len(clips)}_clips")
+                mlflow.log_param(
+                    "data_scope", f"complete_dataset_{len(maneuvers)}_maneuvers"
+                )
                 mlflow.log_param("purpose", "production_evaluation")
                 mlflow.log_param("source_trial", best_trial_result["trial_number"])
                 mlflow.log_param("config_summary", best_config_summary)
@@ -802,7 +878,7 @@ USAGE RECOMMENDATIONS:
 
                 # Run full evaluation
                 result = self._evaluate_single_model_internal(
-                    model, model_name, clips, log_to_mlflow=True
+                    model, model_name, maneuvers, log_to_mlflow=True
                 )
 
                 # Generate sample visualizations for best configuration
@@ -812,7 +888,7 @@ USAGE RECOMMENDATIONS:
                     .get("enabled", False)
                 ):
                     self._create_sample_visualizations(
-                        model, f"{model_name}_best", clips[:3]
+                        model, f"{model_name}_best", maneuvers[:3]
                     )
 
                 return result
@@ -906,35 +982,37 @@ USAGE RECOMMENDATIONS:
         return "_".join(summary_parts[:3]) if summary_parts else "default"
 
     def _evaluate_single_model_internal(
-        self, model, model_name: str, clips: List, log_to_mlflow: bool = False
+        self, model, model_name: str, maneuvers: List, log_to_mlflow: bool = False
     ) -> Dict:
         """Internal method to evaluate a model without starting a new MLflow run"""
         # Evaluation metrics
         all_pose_metrics = []
         all_performance_metrics = []
 
-        # Process clips
-        successful_clips = 0
-        failed_clips = 0
+        # Process maneuvers
+        successful_maneuvers = 0
+        failed_maneuvers = 0
 
-        for i, clip in enumerate(clips):
+        for i, maneuver in enumerate(maneuvers):
             try:
-                clip_metrics = self._process_video_clip(model, clip)
+                maneuver_metrics = self._process_video_maneuver(model, maneuver)
 
-                if clip_metrics["pose"]:
-                    all_pose_metrics.append(clip_metrics["pose"])
-                    all_performance_metrics.append(clip_metrics["performance"])
-                    successful_clips += 1
+                if maneuver_metrics["pose"]:
+                    all_pose_metrics.append(maneuver_metrics["pose"])
+                    all_performance_metrics.append(maneuver_metrics["performance"])
+                    successful_maneuvers += 1
                 else:
-                    failed_clips += 1
+                    failed_maneuvers += 1
 
                 # Progress indicator
                 if (i + 1) % 10 == 0:
-                    print(f"   • Progress: {i + 1}/{len(clips)} clips processed")
+                    print(
+                        f"   • Progress: {i + 1}/{len(maneuvers)} maneuvers processed"
+                    )
 
             except Exception as e:
-                failed_clips += 1
-                logging.warning(f"Failed to process clip {i}: {e}")
+                failed_maneuvers += 1
+                logging.warning(f"Failed to process maneuver {i}: {e}")
 
         # Aggregate results
         if all_pose_metrics and all_performance_metrics:
@@ -947,24 +1025,24 @@ USAGE RECOMMENDATIONS:
                 for metric_name, value in aggregated_metrics.items():
                     mlflow.log_metric(metric_name, value)
 
-                mlflow.log_param("successful_clips", successful_clips)
-                mlflow.log_param("failed_clips", failed_clips)
-                mlflow.log_param("total_clips", len(clips))
+                mlflow.log_param("successful_maneuvers", successful_maneuvers)
+                mlflow.log_param("failed_maneuvers", failed_maneuvers)
+                mlflow.log_param("total_maneuvers", len(maneuvers))
 
             return aggregated_metrics
         else:
             return {"error": "No successful evaluations"}
 
     def _create_sample_visualizations(
-        self, model, model_name: str, clips: List, max_clips: int = 3
+        self, model, model_name: str, maneuvers: List, max_maneuvers: int = 3
     ):
         """Create sample visualization videos for model evaluation
 
         Args:
             model: Pose estimation model instance
             model_name: Name of the model
-            clips: List of video clips to visualize
-            max_clips: Maximum number of clips to visualize
+            maneuvers: List of maneuvers to visualize
+            max_maneuvers: Maximum number of maneuvers to visualize
         """
         try:
             vis_config = self.config.get("output", {}).get("visualization", {})
@@ -972,10 +1050,12 @@ USAGE RECOMMENDATIONS:
                 return
 
             max_examples = vis_config.get("max_examples_per_model", 3)
-            max_clips = min(max_clips, max_examples)
+            max_maneuvers = min(max_maneuvers, max_examples)
 
-            if not clips:
-                logger.warning(f"No clips provided for visualization of {model_name}")
+            if not maneuvers:
+                logging.warning(
+                    f"No maneuvers provided for visualization of {model_name}"
+                )
                 return
 
             # Create visualization directory - use configured path or fallback to results
@@ -1003,22 +1083,24 @@ USAGE RECOMMENDATIONS:
                 "model_name": model_name,
                 "timestamp": timestamp,
                 "config_used": vis_config,
-                "max_clips": max_clips,
-                "clips_processed": [],
+                "max_maneuvers": max_maneuvers,
+                "maneuvers_processed": [],
             }
 
-            logging.info(f"Creating {max_clips} sample visualizations for {model_name}")
+            logging.info(
+                f"Creating {max_maneuvers} sample visualizations for {model_name}"
+            )
 
-            # Process each clip for visualization
-            for clip_idx, clip in enumerate(clips[:max_clips]):
+            # Process each maneuver for visualization
+            for maneuver_idx, maneuver in enumerate(maneuvers[:max_maneuvers]):
                 try:
-                    # Generate pose results for all frames
+                    # Generate pose results for all frames of this maneuver
                     logging.info(
-                        f"  Processing clip {clip_idx + 1}/{max_clips}: {Path(clip.file_path).name}"
+                        f"  Processing maneuver {maneuver_idx + 1}/{max_maneuvers}: {maneuver.maneuver_type} ({maneuver.duration:.1f}s)"
                     )
 
-                    # Load video frames
-                    frames = self.data_loader.load_video_frames(clip)
+                    # Load video frames for this specific maneuver
+                    frames = self.data_loader.load_video_frames(maneuver)
                     pose_results = []
 
                     # Run pose estimation on all frames
@@ -1029,14 +1111,14 @@ USAGE RECOMMENDATIONS:
                         pose_result = model.predict(frame)
                         pose_results.append(pose_result)
 
-                    # Create visualization video
+                    # Create visualization video for this maneuver
                     output_path = (
                         vis_dir
-                        / f"clip_{clip_idx + 1}_{Path(clip.file_path).stem}_poses.mp4"
+                        / f"maneuver_{maneuver_idx + 1}_{maneuver.maneuver_type}_{Path(maneuver.file_path).stem}_poses.mp4"
                     )
 
                     success = self.video_visualizer.create_pose_visualization_video(
-                        video_path=clip.file_path,
+                        video_path=maneuver.file_path,
                         pose_results=pose_results,
                         output_path=str(output_path),
                         model_name=model_name,
@@ -1052,40 +1134,50 @@ USAGE RECOMMENDATIONS:
                             f"    ✅ Created visualization: {output_path.name}"
                         )
 
-                        # Track successful clip in metadata
-                        metadata["clips_processed"].append(
+                        # Track successful maneuver in metadata
+                        metadata["maneuvers_processed"].append(
                             {
-                                "clip_index": clip_idx + 1,
-                                "source_file": Path(clip.file_path).name,
+                                "maneuver_index": maneuver_idx + 1,
+                                "maneuver_type": maneuver.maneuver_type,
+                                "maneuver_duration": maneuver.duration,
+                                "source_file": Path(maneuver.file_path).name,
                                 "output_file": output_path.name,
                                 "status": "success",
                             }
                         )
                     else:
                         logging.warning(
-                            f"    ❌ Failed to create visualization for clip {clip_idx + 1}"
+                            f"    ❌ Failed to create visualization for maneuver {maneuver_idx + 1}"
                         )
 
-                        # Track failed clip in metadata
-                        metadata["clips_processed"].append(
+                        # Track failed maneuver in metadata
+                        metadata["maneuvers_processed"].append(
                             {
-                                "clip_index": clip_idx + 1,
-                                "source_file": Path(clip.file_path).name,
+                                "maneuver_index": maneuver_idx + 1,
+                                "maneuver_type": maneuver.maneuver_type,
+                                "maneuver_duration": maneuver.duration,
+                                "source_file": Path(maneuver.file_path).name,
                                 "output_file": None,
                                 "status": "failed",
                             }
                         )
 
                 except Exception as e:
-                    logging.error(f"    ❌ Error processing clip {clip_idx + 1}: {e}")
+                    logging.error(
+                        f"    ❌ Error processing maneuver {maneuver_idx + 1}: {e}"
+                    )
 
                     # Track error in metadata
-                    metadata["clips_processed"].append(
+                    metadata["maneuvers_processed"].append(
                         {
-                            "clip_index": clip_idx + 1,
+                            "maneuver_index": maneuver_idx + 1,
+                            "maneuver_type": getattr(
+                                maneuver, "maneuver_type", "unknown"
+                            ),
+                            "maneuver_duration": getattr(maneuver, "duration", 0.0),
                             "source_file": (
-                                Path(clip.file_path).name
-                                if hasattr(clip, "file_path")
+                                Path(maneuver.file_path).name
+                                if hasattr(maneuver, "file_path")
                                 else "unknown"
                             ),
                             "output_file": None,
@@ -1101,14 +1193,16 @@ USAGE RECOMMENDATIONS:
                 json.dump(metadata, f, indent=2, default=str)
 
             # Summary
-            successful_clips = len(
-                [c for c in metadata["clips_processed"] if c["status"] == "success"]
+            successful_maneuvers = len(
+                [m for m in metadata["maneuvers_processed"] if m["status"] == "success"]
             )
-            total_clips = len(metadata["clips_processed"])
+            total_maneuvers = len(metadata["maneuvers_processed"])
 
             logging.info(f"Completed visualization generation for {model_name}")
             logging.info(f"  📁 Saved to: {vis_dir}")
-            logging.info(f"  📊 Success rate: {successful_clips}/{total_clips} clips")
+            logging.info(
+                f"  📊 Success rate: {successful_maneuvers}/{total_maneuvers} maneuvers"
+            )
             logging.info(
                 f"  🔄 Synchronized to shared storage for cross-project access"
             )

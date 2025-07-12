@@ -9,8 +9,8 @@ model:
   # Model parameters
   parameters:
     model_complexity: 1 # 0: Lite, 1: Full, 2: Heavy
-    min_detection_confidence: 0.5
-    min_tracking_confidence: 0.5
+    min_detection_confidence: 0.2 # Lower threshold for better detection
+    min_tracking_confidence: 0.2 # Lower threshold for better tracking
     smooth_landmarks: true
     enable_segmentation: false
     smooth_segmentation: true

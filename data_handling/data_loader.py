@@ -61,6 +61,60 @@ class VideoClip:
 
         return frame_annotations
 
+    def get_maneuvers(self) -> List["Maneuver"]:
+        """Extract individual maneuvers from this clip."""
+        maneuvers = []
+        for i, annotation in enumerate(self.annotations):
+            maneuver = Maneuver(
+                clip=self,
+                maneuver_id=f"{self.video_id}_maneuver_{i}",
+                maneuver_type=annotation["labels"][0],
+                execution_score=annotation["labels"][1],
+                start_time=annotation["start"],
+                end_time=annotation["end"],
+                start_frame=int(annotation["start"] * self.fps),
+                end_frame=int(annotation["end"] * self.fps),
+                annotation_data=annotation,
+            )
+            maneuvers.append(maneuver)
+        return maneuvers
+
+
+@dataclass
+class Maneuver:
+    """Represents an individual surfing maneuver with its timecode and metadata."""
+
+    clip: VideoClip
+    maneuver_id: str
+    maneuver_type: str  # "popup", "cutback", etc.
+    execution_score: float
+    start_time: float  # seconds
+    end_time: float  # seconds
+    start_frame: int
+    end_frame: int
+    annotation_data: Dict
+
+    @property
+    def duration(self) -> float:
+        return self.end_time - self.start_time
+
+    @property
+    def total_frames(self) -> int:
+        return self.end_frame - self.start_frame
+
+    @property
+    def file_path(self) -> str:
+        """Return the video file path for compatibility."""
+        return self.clip.file_path
+
+    @property
+    def fps(self) -> float:
+        return self.clip.fps
+
+    def get_frame_range(self) -> Tuple[int, int]:
+        """Get the frame range for this maneuver."""
+        return self.start_frame, self.end_frame
+
 
 @dataclass
 class DataSplit:
@@ -552,16 +606,20 @@ class SurfingDataLoader:
         logger.info(f"Selected {len(filtered_clips)} clips for evaluation")
         return filtered_clips
 
-    def load_clips(self, max_clips: Optional[int] = None, split: str = "test", 
-                   video_format: str = "h264") -> List[VideoClip]:
+    def load_clips(
+        self,
+        max_clips: Optional[int] = None,
+        split: str = "test",
+        video_format: str = "h264",
+    ) -> List[VideoClip]:
         """
         Load clips for evaluation - convenience method for the evaluation script.
-        
+
         Args:
             max_clips: Maximum number of clips to load
             split: Data split to use ("train", "val", "test")
             video_format: Video format to use ("h264" or "ffv1")
-            
+
         Returns:
             List of VideoClip objects ready for evaluation
         """
@@ -569,64 +627,124 @@ class SurfingDataLoader:
         if not self.all_clips:
             logger.info("Loading annotations...")
             self.load_annotations()
-            
+
             logger.info(f"Discovering {video_format} video clips...")
             self.all_clips = self.discover_video_clips(video_format)
-            
+
             logger.info("Creating data splits...")
             self.create_data_splits()
-        
+
         # Get clips for evaluation
-        clips = self.get_evaluation_subset(
-            split=split,
-            max_clips=max_clips
-        )
-        
+        clips = self.get_evaluation_subset(split=split, max_clips=max_clips)
+
         return clips
 
-    def load_video_frames(
-        self, clip: VideoClip, start_frame: int = 0, end_frame: Optional[int] = None
-    ) -> np.ndarray:
+    def load_maneuvers(
+        self,
+        max_clips: Optional[int] = None,
+        split: str = "test",
+        video_format: str = "h264",
+        maneuvers_per_clip: Optional[int] = None,
+    ) -> List[Maneuver]:
         """
-        Load frames from a video clip.
+        Load individual maneuvers for evaluation instead of full clips.
 
         Args:
-            clip: VideoClip object
-            start_frame: Starting frame index
+            max_clips: Maximum number of clips to load maneuvers from
+            split: Data split to use ("train", "val", "test")
+            video_format: Video format to use ("h264" or "ffv1")
+            maneuvers_per_clip: Maximum maneuvers per clip (None for all)
+
+        Returns:
+            List of Maneuver objects ready for evaluation
+        """
+        # Get clips first
+        clips = self.load_clips(
+            max_clips=max_clips, split=split, video_format=video_format
+        )
+
+        # Extract maneuvers from clips
+        all_maneuvers = []
+        for clip in clips:
+            clip_maneuvers = clip.get_maneuvers()
+
+            # Limit maneuvers per clip if specified
+            if maneuvers_per_clip and len(clip_maneuvers) > maneuvers_per_clip:
+                # Randomly sample maneuvers
+                import random
+
+                clip_maneuvers = random.sample(clip_maneuvers, maneuvers_per_clip)
+
+            all_maneuvers.extend(clip_maneuvers)
+
+        logger.info(f"Loaded {len(all_maneuvers)} maneuvers from {len(clips)} clips")
+        return all_maneuvers
+
+    def load_video_frames(
+        self, clip_or_maneuver, start_frame: int = 0, end_frame: Optional[int] = None
+    ) -> np.ndarray:
+        """
+        Load frames from a video clip or maneuver.
+
+        Args:
+            clip_or_maneuver: VideoClip or Maneuver object
+            start_frame: Starting frame index (relative to clip/maneuver)
             end_frame: Ending frame index (None for all frames)
 
         Returns:
             Array of frames with shape (num_frames, height, width, channels)
         """
-        cap = cv2.VideoCapture(clip.file_path)
+        # Handle both VideoClip and Maneuver objects
+        if isinstance(clip_or_maneuver, Maneuver):
+            # For maneuvers, use the maneuver's frame range
+            file_path = clip_or_maneuver.file_path
+            maneuver_start, maneuver_end = clip_or_maneuver.get_frame_range()
+
+            # Adjust frame indices to be relative to the maneuver
+            actual_start = maneuver_start + start_frame
+            actual_end = maneuver_start + (
+                end_frame if end_frame is not None else clip_or_maneuver.total_frames
+            )
+
+            # Ensure we don't go beyond the maneuver's end
+            actual_end = min(actual_end, maneuver_end)
+
+        else:
+            # For clips, use the provided range or full clip
+            file_path = clip_or_maneuver.file_path
+            actual_start = start_frame
+            actual_end = (
+                end_frame if end_frame is not None else clip_or_maneuver.total_frames
+            )
+
+        cap = cv2.VideoCapture(file_path)
         if not cap.isOpened():
-            raise ValueError(f"Could not open video: {clip.file_path}")
+            raise ValueError(f"Could not open video: {file_path}")
 
         frames = []
         frame_idx = 0
-
-        if end_frame is None:
-            end_frame = clip.total_frames
 
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
 
-            if frame_idx >= start_frame and frame_idx < end_frame:
+            if frame_idx >= actual_start and frame_idx < actual_end:
                 # Convert BGR to RGB
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 frames.append(frame_rgb)
 
             frame_idx += 1
 
-            if frame_idx >= end_frame:
+            if frame_idx >= actual_end:
                 break
 
         cap.release()
 
         if not frames:
-            raise ValueError(f"No frames loaded from {clip.file_path}")
+            raise ValueError(
+                f"No frames loaded from {file_path} (range: {actual_start}-{actual_end})"
+            )
 
         return np.array(frames)
 
