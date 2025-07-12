@@ -214,3 +214,4 @@ evaluation_*.log
 temp_*/
 *_temp/
 *.debug
+data
