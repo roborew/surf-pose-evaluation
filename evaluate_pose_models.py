@@ -4,9 +4,18 @@ Surfing Pose Estimation Evaluation Framework
 Main evaluation script for comparing pose estimation models
 """
 
+# Set MediaPipe/TensorFlow environment variables before any imports
+import os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Suppress TF warnings
+os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"  # Force CPU only
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"  # Disable GPU memory growth
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # Disable oneDNN optimizations for macOS
+os.environ["TF_DISABLE_MKL"] = "1"  # Disable Intel MKL
+os.environ["TF_DISABLE_SEGMENT_REDUCTION_OP_DETERMINISM_EXCEPTIONS"] = "1"  # Stability
+
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -974,13 +983,13 @@ USAGE RECOMMENDATIONS:
             if shared_storage_path:
                 # Use shared storage location
                 vis_base_dir = Path(shared_storage_path)
-                logger.info(f"Using shared storage location: {vis_base_dir}")
+                logging.info(f"Using shared storage location: {vis_base_dir}")
             else:
                 # Fall back to local results directory
                 vis_base_dir = Path(
                     self.config.get("output", {}).get("results_dir", "./results")
                 )
-                logger.info(f"Using local results directory: {vis_base_dir}")
+                logging.info(f"Using local results directory: {vis_base_dir}")
 
             shared_pose_dir = vis_base_dir
 
@@ -998,13 +1007,13 @@ USAGE RECOMMENDATIONS:
                 "clips_processed": [],
             }
 
-            logger.info(f"Creating {max_clips} sample visualizations for {model_name}")
+            logging.info(f"Creating {max_clips} sample visualizations for {model_name}")
 
             # Process each clip for visualization
             for clip_idx, clip in enumerate(clips[:max_clips]):
                 try:
                     # Generate pose results for all frames
-                    logger.info(
+                    logging.info(
                         f"  Processing clip {clip_idx + 1}/{max_clips}: {Path(clip.file_path).name}"
                     )
 
@@ -1015,7 +1024,7 @@ USAGE RECOMMENDATIONS:
                     # Run pose estimation on all frames
                     for frame_idx, frame in enumerate(frames):
                         if frame_idx % 10 == 0:  # Progress update
-                            logger.info(f"    Frame {frame_idx + 1}/{len(frames)}")
+                            logging.info(f"    Frame {frame_idx + 1}/{len(frames)}")
 
                         pose_result = model.predict(frame)
                         pose_results.append(pose_result)
@@ -1039,7 +1048,9 @@ USAGE RECOMMENDATIONS:
                     if success:
                         # Log to MLflow
                         self.mlflow_manager.log_video_sample(str(output_path))
-                        logger.info(f"    ✅ Created visualization: {output_path.name}")
+                        logging.info(
+                            f"    ✅ Created visualization: {output_path.name}"
+                        )
 
                         # Track successful clip in metadata
                         metadata["clips_processed"].append(
@@ -1051,7 +1062,7 @@ USAGE RECOMMENDATIONS:
                             }
                         )
                     else:
-                        logger.warning(
+                        logging.warning(
                             f"    ❌ Failed to create visualization for clip {clip_idx + 1}"
                         )
 
@@ -1066,7 +1077,7 @@ USAGE RECOMMENDATIONS:
                         )
 
                 except Exception as e:
-                    logger.error(f"    ❌ Error processing clip {clip_idx + 1}: {e}")
+                    logging.error(f"    ❌ Error processing clip {clip_idx + 1}: {e}")
 
                     # Track error in metadata
                     metadata["clips_processed"].append(
@@ -1095,13 +1106,15 @@ USAGE RECOMMENDATIONS:
             )
             total_clips = len(metadata["clips_processed"])
 
-            logger.info(f"Completed visualization generation for {model_name}")
-            logger.info(f"  📁 Saved to: {vis_dir}")
-            logger.info(f"  📊 Success rate: {successful_clips}/{total_clips} clips")
-            logger.info(f"  🔄 Synchronized to shared storage for cross-project access")
+            logging.info(f"Completed visualization generation for {model_name}")
+            logging.info(f"  📁 Saved to: {vis_dir}")
+            logging.info(f"  📊 Success rate: {successful_clips}/{total_clips} clips")
+            logging.info(
+                f"  🔄 Synchronized to shared storage for cross-project access"
+            )
 
         except Exception as e:
-            logger.error(
+            logging.error(
                 f"Failed to create sample visualizations for {model_name}: {e}"
             )
 
