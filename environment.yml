@@ -56,8 +56,8 @@ dependencies:
       - mmpose==1.1.0
       - xtcocotools==1.14.1
 
-      # MediaPipe
-      - mediapipe==0.10.11
+      # MediaPipe (use latest stable version)
+      - mediapipe==0.10.21
 
       # YOLOv8 (Ultralytics)
       - ultralytics==8.0.134
