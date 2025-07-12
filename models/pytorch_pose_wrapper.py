@@ -25,6 +25,11 @@ class PyTorchPoseWrapper(BasePoseModel):
             device: Compute device ('cpu', 'cuda', 'mps')
             **kwargs: Model configuration
         """
+        # Force CPU for PyTorch models on Apple Silicon due to MPS issues
+        if device == "mps":
+            print("Warning: PyTorch KeypointRCNN has MPS compatibility issues, forcing CPU usage")
+            device = "cpu"
+        
         super().__init__(device, **kwargs)
 
         # Model configuration

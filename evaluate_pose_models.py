@@ -29,6 +29,7 @@ from metrics.pose_metrics import PoseMetrics
 from metrics.performance_metrics import PerformanceMetrics
 from utils.mlflow_utils import MLflowManager
 from utils.visualization import VisualizationUtils
+from utils.pose_video_visualizer import PoseVideoVisualizer
 
 # Import other model wrappers when available
 try:
@@ -45,6 +46,11 @@ try:
     from models.yolov8_wrapper import YOLOv8Wrapper
 except ImportError:
     YOLOv8Wrapper = None
+
+try:
+    from models.pytorch_pose_wrapper import PyTorchPoseWrapper
+except ImportError:
+    PyTorchPoseWrapper = None
 
 # HRNet functionality is available through MMPose framework
 
@@ -63,6 +69,12 @@ class PoseEvaluator:
         self.performance_metrics = PerformanceMetrics(device=self.device)
         self.mlflow_manager = MLflowManager(self.config["mlflow"])
         self.visualizer = VisualizationUtils()
+
+        # Initialize video visualizer with encoding configuration
+        encoding_config = (
+            self.config.get("output", {}).get("visualization", {}).get("encoding", {})
+        )
+        self.video_visualizer = PoseVideoVisualizer(encoding_config)
 
         # Model registry
         self.model_registry = self._setup_model_registry()
@@ -108,6 +120,10 @@ class PoseEvaluator:
         # YOLOv8-Pose (if available)
         if YOLOv8Wrapper is not None:
             registry["yolov8_pose"] = YOLOv8Wrapper
+
+        # PyTorch KeypointRCNN (if available)
+        if PyTorchPoseWrapper is not None:
+            registry["pytorch_pose"] = PyTorchPoseWrapper
 
         # HRNet functionality available through MMPose framework
 
@@ -320,6 +336,16 @@ USAGE RECOMMENDATIONS:
             model_artifacts_path = f"models/{model_name}"
             os.makedirs(model_artifacts_path, exist_ok=True)
             mlflow.log_artifacts(model_artifacts_path)
+
+            # Generate sample visualizations if enabled
+            if (
+                self.config.get("output", {})
+                .get("visualization", {})
+                .get("enabled", False)
+            ):
+                self._create_sample_visualizations(
+                    model, model_name, clips[:3]
+                )  # Use first 3 clips
 
             return aggregated_metrics
 
@@ -766,9 +792,21 @@ USAGE RECOMMENDATIONS:
                     mlflow.log_param(param_name, param_value)
 
                 # Run full evaluation
-                return self._evaluate_single_model_internal(
+                result = self._evaluate_single_model_internal(
                     model, model_name, clips, log_to_mlflow=True
                 )
+
+                # Generate sample visualizations for best configuration
+                if (
+                    self.config.get("output", {})
+                    .get("visualization", {})
+                    .get("enabled", False)
+                ):
+                    self._create_sample_visualizations(
+                        model, f"{model_name}_best", clips[:3]
+                    )
+
+                return result
 
         else:
             print(f"\n❌ No successful trials for {model_name}")
@@ -907,6 +945,165 @@ USAGE RECOMMENDATIONS:
             return aggregated_metrics
         else:
             return {"error": "No successful evaluations"}
+
+    def _create_sample_visualizations(
+        self, model, model_name: str, clips: List, max_clips: int = 3
+    ):
+        """Create sample visualization videos for model evaluation
+
+        Args:
+            model: Pose estimation model instance
+            model_name: Name of the model
+            clips: List of video clips to visualize
+            max_clips: Maximum number of clips to visualize
+        """
+        try:
+            vis_config = self.config.get("output", {}).get("visualization", {})
+            if not vis_config.get("enabled", False):
+                return
+
+            max_examples = vis_config.get("max_examples_per_model", 3)
+            max_clips = min(max_clips, max_examples)
+
+            if not clips:
+                logger.warning(f"No clips provided for visualization of {model_name}")
+                return
+
+            # Create visualization directory - use configured path or fallback to results
+            shared_storage_path = vis_config.get("shared_storage_path")
+            if shared_storage_path:
+                # Use shared storage location
+                vis_base_dir = Path(shared_storage_path)
+                logger.info(f"Using shared storage location: {vis_base_dir}")
+            else:
+                # Fall back to local results directory
+                vis_base_dir = Path(
+                    self.config.get("output", {}).get("results_dir", "./results")
+                )
+                logger.info(f"Using local results directory: {vis_base_dir}")
+
+            shared_pose_dir = vis_base_dir
+
+            # Create organized directory structure
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            vis_dir = shared_pose_dir / "visualizations" / f"{timestamp}_{model_name}"
+            vis_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create metadata file for this visualization session
+            metadata = {
+                "model_name": model_name,
+                "timestamp": timestamp,
+                "config_used": vis_config,
+                "max_clips": max_clips,
+                "clips_processed": [],
+            }
+
+            logger.info(f"Creating {max_clips} sample visualizations for {model_name}")
+
+            # Process each clip for visualization
+            for clip_idx, clip in enumerate(clips[:max_clips]):
+                try:
+                    # Generate pose results for all frames
+                    logger.info(
+                        f"  Processing clip {clip_idx + 1}/{max_clips}: {Path(clip.file_path).name}"
+                    )
+
+                    # Load video frames
+                    frames = self.data_loader.load_video_frames(clip)
+                    pose_results = []
+
+                    # Run pose estimation on all frames
+                    for frame_idx, frame in enumerate(frames):
+                        if frame_idx % 10 == 0:  # Progress update
+                            logger.info(f"    Frame {frame_idx + 1}/{len(frames)}")
+
+                        pose_result = model.predict(frame)
+                        pose_results.append(pose_result)
+
+                    # Create visualization video
+                    output_path = (
+                        vis_dir
+                        / f"clip_{clip_idx + 1}_{Path(clip.file_path).stem}_poses.mp4"
+                    )
+
+                    success = self.video_visualizer.create_pose_visualization_video(
+                        video_path=clip.file_path,
+                        pose_results=pose_results,
+                        output_path=str(output_path),
+                        model_name=model_name,
+                        kpt_thr=0.3,
+                        bbox_thr=0.3,
+                        max_persons=2,
+                    )
+
+                    if success:
+                        # Log to MLflow
+                        self.mlflow_manager.log_video_sample(str(output_path))
+                        logger.info(f"    ✅ Created visualization: {output_path.name}")
+
+                        # Track successful clip in metadata
+                        metadata["clips_processed"].append(
+                            {
+                                "clip_index": clip_idx + 1,
+                                "source_file": Path(clip.file_path).name,
+                                "output_file": output_path.name,
+                                "status": "success",
+                            }
+                        )
+                    else:
+                        logger.warning(
+                            f"    ❌ Failed to create visualization for clip {clip_idx + 1}"
+                        )
+
+                        # Track failed clip in metadata
+                        metadata["clips_processed"].append(
+                            {
+                                "clip_index": clip_idx + 1,
+                                "source_file": Path(clip.file_path).name,
+                                "output_file": None,
+                                "status": "failed",
+                            }
+                        )
+
+                except Exception as e:
+                    logger.error(f"    ❌ Error processing clip {clip_idx + 1}: {e}")
+
+                    # Track error in metadata
+                    metadata["clips_processed"].append(
+                        {
+                            "clip_index": clip_idx + 1,
+                            "source_file": (
+                                Path(clip.file_path).name
+                                if hasattr(clip, "file_path")
+                                else "unknown"
+                            ),
+                            "output_file": None,
+                            "status": "error",
+                            "error_message": str(e),
+                        }
+                    )
+                    continue
+
+            # Save metadata file
+            metadata_path = vis_dir / "visualization_metadata.json"
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=2, default=str)
+
+            # Summary
+            successful_clips = len(
+                [c for c in metadata["clips_processed"] if c["status"] == "success"]
+            )
+            total_clips = len(metadata["clips_processed"])
+
+            logger.info(f"Completed visualization generation for {model_name}")
+            logger.info(f"  📁 Saved to: {vis_dir}")
+            logger.info(f"  📊 Success rate: {successful_clips}/{total_clips} clips")
+            logger.info(f"  🔄 Synchronized to shared storage for cross-project access")
+
+        except Exception as e:
+            logger.error(
+                f"Failed to create sample visualizations for {model_name}: {e}"
+            )
 
     def save_results(self, results: Dict, output_path: str):
         """Save evaluation results to file"""

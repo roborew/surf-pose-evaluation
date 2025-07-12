@@ -179,13 +179,33 @@ output:
   # Results directory
   results_dir: "./results"
 
-  # Visualization settings
+    # Visualization settings
   visualization:
     enabled: true
     save_overlay_videos: true
     save_keypoint_plots: true
     save_comparison_plots: true
     max_examples_per_model: 10
+    
+    # Storage location for visualizations
+    # If shared_storage_path is set, visualizations will be saved there for cross-project sync
+    # If not set, visualizations will be saved to the local results_dir
+    shared_storage_path: "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE"
+    
+    # Alternative: Disable shared storage and use local results only
+    # shared_storage_path: null  # Uncomment to disable shared storage
+    
+    # Video encoding settings
+    encoding:
+      format: "h264"  # h264, h265, prores, ffv1, lossless
+      quality:
+        crf: 20  # 18-28 for good quality, lower = better quality (production quality)
+        preset: "medium"  # ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
+      pixel_format: "yuv420p"
+      audio:
+        enabled: true
+        codec: "copy"  # copy, aac, mp3
+      container: "mp4"  # mp4, mkv, avi, mov
 
   # Report generation
   reports:

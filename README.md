@@ -1,17 +1,18 @@
 # Surfing Pose Estimation Evaluation Framework
 
-A comprehensive system for comparing and evaluating multiple pose estimation libraries for surfing performance analysis using MLflow experiment tracking and Optuna hyperparameter optimization.
+A comprehensive system for comparing and evaluating multiple pose estimation libraries for surfing performance analysis using MLflow experiment tracking, Optuna hyperparameter optimization, and configurable video visualization.
 
 ## Project Overview
 
-This framework systematically compares pose estimation models to determine the optimal backbone for surfing action recognition. It supports both local development (macOS) and production evaluation (Linux/CUDA) environments.
+This framework systematically compares pose estimation models to determine the optimal backbone for surfing action recognition. It supports both local development (macOS) and production evaluation (Linux/CUDA) environments with advanced visualization capabilities and cross-project data sharing.
 
 ### Supported Models
 
-- **MMPose** - Extensive model zoo with high accuracy
-- **MediaPipe Pose** - Fast, edge-optimized for real-time inference
-- **YOLOv8-Pose** - Unified detection and pose estimation
-- **MMPose** - Industry-standard framework (includes HRNet backbones)
+- **MediaPipe Pose** - Fast, edge-optimized for real-time inference ✅
+- **BlazePose** - Google's optimized real-time 3D pose estimation ✅
+- **YOLOv8-Pose** - Unified detection and pose estimation ✅
+- **MMPose** - Industry-standard framework (includes HRNet backbones) ✅
+- **PyTorch KeypointRCNN** - Torchvision's pose estimation model ✅
 
 > **Note**: OpenPose excluded due to poor performance (5 FPS vs 20-60 FPS for modern alternatives) and installation complexity.
 
@@ -37,7 +38,7 @@ python test_zoom_loading.py
 python -c "import torch; print(f'MPS available: {torch.backends.mps.is_available()}')"
 ```
 
-**Capabilities:** ✅ MediaPipe ✅ BlazePose ✅ YOLOv8 ✅ MPS acceleration ❌ MMPose (setup required)
+**Capabilities:** ✅ MediaPipe ✅ BlazePose ✅ YOLOv8 ✅ PyTorch ✅ MPS acceleration ✅ MMPose
 
 #### Linux Setup (Production)
 
@@ -70,7 +71,7 @@ python evaluate_pose_models.py \
     --quick-test --models mediapipe --max-clips 10
 ```
 
-### 3. Full Evaluation
+### 3. Full Evaluation with Visualization
 
 ```bash
 # Run in tmux for long sessions (Linux)
@@ -84,17 +85,24 @@ tmux attach -t pose_eval
 
 ```
 surf_pose_evaluation/
-├── README.md                       # This file
+├── README.md                       # This comprehensive guide
 ├── environment*.yml                # Environment configurations
 ├── evaluate_pose_models.py        # Main evaluation script
 ├── configs/
 │   ├── evaluation_config*.yaml     # Environment-specific configs
+│   ├── evaluation_config_production.yaml  # Lossless video format
 │   └── model_configs/              # Individual model configurations
 ├── models/                         # Pose model wrappers
 ├── metrics/                        # Evaluation metrics
 ├── data_handling/                  # Zoom-aware data loading
-├── utils/                          # MLflow, visualization utilities
-├── data/                           # Your dataset
+├── utils/
+│   ├── mlflow_utils.py            # MLflow experiment tracking
+│   ├── visualization.py           # Static visualization utilities
+│   └── pose_video_visualizer.py   # Video visualization with pose overlays
+├── data/
+│   └── SD_02_SURF_FOOTAGE_PREPT/
+│       └── 05_ANALYSED_DATA/
+│           └── POSE/               # Shared storage for cross-project sync
 └── results/                        # MLflow experiments and outputs
 ```
 
@@ -118,6 +126,32 @@ python test_zoom_loading.py  # Verify this works
 - **Production (Linux)**: Comprehensive evaluation with all models
 - **Automatic acceleration**: MPS on macOS, CUDA on Linux
 
+### Advanced Visualization System
+
+**High-quality pose video generation with:**
+
+- Color-coded anatomical regions (left/right limbs, torso, face)
+- Professional video encoding (H.264, H.265, lossless formats)
+- Audio preservation from original footage
+- Model identification and frame counters
+- Automatic MLflow integration
+
+**Shared Storage Integration:**
+
+- Cross-project synchronization via configurable shared storage
+- Timestamped directories prevent overwrites
+- Comprehensive metadata tracking
+- Organized directory structure for team collaboration
+
+### Hyperparameter Optimization
+
+**Optuna integration for automatic model tuning:**
+
+- TPE (Tree-structured Parzen Estimator) sampling
+- Early pruning for poor trials
+- Multi-objective optimization (accuracy, speed, memory)
+- Comprehensive trial tracking in MLflow
+
 ### Comprehensive Metrics
 
 - **Accuracy**: PCK@0.2, MPJPE, detection metrics
@@ -126,22 +160,93 @@ python test_zoom_loading.py  # Verify this works
 
 ## Configuration
 
-### Files
+### Configuration Files
 
-- `configs/evaluation_config_macos.yaml` - Development (MPS, reduced clips, lightweight models)
-- `configs/evaluation_config.yaml` - Production (CUDA, full clips, all models)
+| File                                | Purpose            | Environment   | Video Format  |
+| ----------------------------------- | ------------------ | ------------- | ------------- |
+| `evaluation_config_macos.yaml`      | Development        | Apple Silicon | H.264 MP4     |
+| `evaluation_config.yaml`            | Production         | CUDA/Linux    | H.264 MP4     |
+| `evaluation_config_production.yaml` | Production Testing | CUDA/Linux    | Lossless MKV  |
+| `evaluation_config_local.yaml`      | Local Development  | Any           | Local storage |
 
-### Video Formats
+### Video Encoding Formats
 
-- **H264**: Compressed videos for development
-- **FFV1**: Lossless videos for production evaluation
+**Configurable video encoding for different use cases:**
+
+#### H.264 (Default - Recommended for Annotated Results)
+
+```yaml
+encoding:
+  format: "h264"
+  quality:
+    crf: 23 # 18-28 range, lower = better quality
+    preset: "fast" # ultrafast to veryslow
+  pixel_format: "yuv420p"
+  container: "mp4"
+```
+
+**Characteristics:**
+
+- ✅ Small file sizes (good for sharing)
+- ✅ Wide compatibility (plays everywhere)
+- ✅ Fast encoding (quick processing)
+- ❌ Lossy compression (not suitable for production testing)
+
+#### Lossless (Production Testing)
+
+```yaml
+encoding:
+  format: "lossless"
+  quality:
+    crf: 0 # Lossless
+    preset: "veryslow" # Best compression
+  pixel_format: "yuv444p" # Full chroma
+  container: "mkv"
+```
+
+**Characteristics:**
+
+- ✅ Perfect quality (no compression artifacts)
+- ✅ Suitable for production testing
+- ❌ Very large files (10-50x larger)
+- ❌ Very slow encoding (10x longer)
+
+#### Other Formats Available
+
+- **H.265/HEVC**: Better compression, slower encoding
+- **FFV1**: True lossless, open source
+- **ProRes**: Professional quality for macOS
+
+### Shared Storage Configuration
+
+**Flexible storage options for cross-project collaboration:**
+
+```yaml
+output:
+  visualization:
+    # Shared storage (default)
+    shared_storage_path: "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE"
+
+    # Local storage (development)
+    # shared_storage_path: null  # Omit for local storage
+
+    # Custom path
+    # shared_storage_path: "/path/to/your/custom/storage"
+```
+
+**Storage Benefits:**
+
+- **Cross-project sharing**: Results synced across projects
+- **Timestamped directories**: No overwrites, chronological ordering
+- **Metadata tracking**: Complete processing history
+- **Team collaboration**: Centralized access to visualizations
 
 ## Performance Expectations
 
-| Environment | Hardware      | MediaPipe | MMPose    | YOLOv8    | Memory                   |
-| ----------- | ------------- | --------- | --------- | --------- | ------------------------ |
-| **macOS**   | Apple Silicon | 15-25 FPS | N/A       | 10-20 FPS | 2-4GB RAM                |
-| **Linux**   | RTX 4090      | 30-60 FPS | 10-20 FPS | 20-40 FPS | 8-16GB RAM + 4-12GB VRAM |
+| Environment | Hardware      | MediaPipe | MMPose    | YOLOv8    | PyTorch   | Memory                   |
+| ----------- | ------------- | --------- | --------- | --------- | --------- | ------------------------ |
+| **macOS**   | Apple Silicon | 15-25 FPS | 8-15 FPS  | 10-20 FPS | 5-12 FPS  | 2-4GB RAM                |
+| **Linux**   | RTX 4090      | 30-60 FPS | 10-20 FPS | 20-40 FPS | 15-25 FPS | 8-16GB RAM + 4-12GB VRAM |
 
 ## Development Workflow
 
@@ -154,7 +259,25 @@ python evaluate_pose_models.py \
     --quick-test --models mediapipe --max-clips 5 --verbose
 ```
 
-### 2. Transfer to Production
+### 2. Hyperparameter Optimization
+
+```bash
+# Automatic model tuning with Optuna
+python evaluate_pose_models.py \
+    --config configs/evaluation_config_macos.yaml \
+    --models mediapipe --use-optuna --max-clips 50
+```
+
+### 3. Production Evaluation with Lossless Video
+
+```bash
+# Production testing with lossless format
+python evaluate_pose_models.py \
+    --config configs/evaluation_config_production.yaml \
+    --models mediapipe yolov8_pose --max-clips 100
+```
+
+### 4. Transfer to Production
 
 ```bash
 # Git method (recommended)
@@ -166,15 +289,6 @@ rsync -av --exclude results/ --exclude __pycache__/ \
     surf_pose_evaluation/ user@training-machine:~/surf_pose_evaluation/
 ```
 
-### 3. Production Evaluation
-
-```bash
-ssh user@training-machine
-cd ~/surf_pose_evaluation
-conda activate surf_pose_eval
-python evaluate_pose_models.py --config configs/evaluation_config.yaml --models all
-```
-
 ## MLflow Integration
 
 All experiments automatically logged with:
@@ -183,6 +297,7 @@ All experiments automatically logged with:
 - Evaluation metrics and performance benchmarks
 - Video samples with pose overlays
 - Model artifacts and checkpoints
+- Optuna trial results and optimization history
 
 ```bash
 # Local MLflow UI
@@ -242,20 +357,66 @@ results = evaluator.full_evaluation(
 )
 ```
 
-### Command Line
+### Command Line Examples
 
 ```bash
-# Compare specific models
+# Compare specific models with visualizations
 python evaluate_pose_models.py \
-    --models mediapipe mmpose yolov8_pose \
-    --max-clips 100 \
-    --video-format ffv1
+    --config configs/evaluation_config_macos.yaml \
+    --models mediapipe yolov8_pose \
+    --max-clips 100
 
 # Quick development test
 python evaluate_pose_models.py \
-    --config configs/evaluation_config_macos.yaml \
+    --config configs/evaluation_config_local.yaml \
     --quick-test --verbose
+
+# Production evaluation with lossless video
+python evaluate_pose_models.py \
+    --config configs/evaluation_config_production.yaml \
+    --models all --max-clips 300
+
+# Hyperparameter optimization
+python evaluate_pose_models.py \
+    --config configs/evaluation_config.yaml \
+    --models mediapipe --use-optuna
 ```
+
+## Visualization Features
+
+### Automatic Video Generation
+
+**Sample videos created for each model showing:**
+
+- Color-coded pose keypoints and skeleton
+- Anatomical region highlighting (left/right limbs, torso, face)
+- Model identification and frame counters
+- Professional video encoding with audio preservation
+
+### Shared Storage Integration
+
+**Cross-project synchronization:**
+
+```
+data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/
+├── visualizations/
+│   ├── 20241214_143052_mediapipe/
+│   │   ├── clip_1_C0019_clip_1_poses.mp4
+│   │   ├── clip_2_C0019_clip_2_poses.mp4
+│   │   └── visualization_metadata.json
+│   └── 20241214_143125_yolov8_pose/
+│       ├── clip_1_C0019_clip_1_poses.mp4
+│       └── visualization_metadata.json
+```
+
+### Video Format Options
+
+| Format       | Use Case           | File Size  | Quality | Encoding Time |
+| ------------ | ------------------ | ---------- | ------- | ------------- |
+| H.264 MP4    | Annotated results  | 10-20 MB   | Good    | Fast          |
+| H.265 MP4    | Better compression | 5-12 MB    | High    | Medium        |
+| Lossless MKV | Production testing | 200-500 MB | Perfect | Slow          |
+| FFV1 MKV     | Archival quality   | 100-300 MB | Perfect | Medium        |
 
 ## Troubleshooting
 
@@ -264,12 +425,21 @@ python evaluate_pose_models.py \
 - **MPS not available**: Requires macOS 12.3+
 - **Memory errors**: Reduce batch size and clip count
 - **Package conflicts**: Use `environment_simple.yml`
+- **MediaPipe issues**: Update to latest version (0.10.21+)
 
 ### Linux Issues
 
 - **CUDA errors**: Check drivers with `nvidia-smi`
 - **Out of memory**: Reduce batch size
 - **MMPose installation**: Try manual `pip install mmengine mmcv mmdet mmpose`
+- **FFmpeg not found**: Install with `sudo apt install ffmpeg`
+
+### Visualization Issues
+
+- **Video encoding fails**: Check FFmpeg installation
+- **Large file sizes**: Use H.264 format with higher CRF values
+- **Slow encoding**: Use faster presets (ultrafast, superfast)
+- **Shared storage access**: Verify path permissions
 
 ### General Issues
 
@@ -280,12 +450,47 @@ python -c "from models.mediapipe_wrapper import MediaPipeWrapper; print('OK')"
 
 # Check acceleration
 python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}, MPS: {torch.backends.mps.is_available()}')"
+
+# Test video encoding
+python -c "import subprocess; subprocess.run(['ffmpeg', '-version'])"
 ```
 
 ## Data Requirements
 
 **Minimum (Testing)**: 10-20 labeled clips, balanced cameras/sessions  
 **Recommended (Production)**: 200-300 clips, multiple cameras (SONY_300, SONY_70, GP1, GP2), various conditions
+
+## Advanced Features
+
+### Optuna Hyperparameter Optimization
+
+**Automatic model tuning with:**
+
+- TPE (Tree-structured Parzen Estimator) sampling
+- Early pruning for poor-performing trials
+- Multi-objective optimization (accuracy, speed, memory)
+- Comprehensive trial tracking in MLflow
+
+```bash
+# Enable optimization in config
+optuna:
+  enabled: true
+  n_trials: 50
+  timeout_minutes: 180
+  objective:
+    primary_metric: "pck_0.2"
+    secondary_metrics: ["inference_latency_ms", "memory_usage_gb"]
+    weights: [0.7, 0.2, 0.1]
+```
+
+### Model-Specific Configurations
+
+Each model has dedicated configuration files in `configs/model_configs/`:
+
+- `mediapipe.yaml` - MediaPipe-specific parameters
+- `yolov8_pose.yaml` - YOLOv8 model variants and thresholds
+- `mmpose.yaml` - MMPose backbone configurations
+- `pytorch_pose.yaml` - PyTorch KeypointRCNN settings
 
 ## Contributing
 
@@ -295,16 +500,29 @@ To add new pose models:
 2. Add configuration in `configs/model_configs/`
 3. Update environment files with dependencies
 4. Test on both macOS and Linux environments
+5. Add visualization support if needed
 
 ## Results
 
 Results stored in multiple formats:
 
-- JSON files for programmatic analysis
-- MLflow experiments for interactive exploration
-- Visualization plots and video overlays
-- Performance benchmarks and model comparisons
+- **JSON files** for programmatic analysis
+- **MLflow experiments** for interactive exploration
+- **Visualization videos** with pose overlays
+- **Performance benchmarks** and model comparisons
+- **Shared storage** for cross-project access
+
+### File Size Expectations
+
+For typical 30-second 1080p visualizations:
+
+| Format         | File Size  | Best For           |
+| -------------- | ---------- | ------------------ |
+| H.264 (CRF 23) | 10-20 MB   | Sharing, review    |
+| H.265 (CRF 23) | 5-12 MB    | Better compression |
+| Lossless H.264 | 200-500 MB | Production testing |
+| FFV1           | 100-300 MB | Archival quality   |
 
 ---
 
-For questions or issues, check the troubleshooting section above or examine the test scripts for debugging.
+For questions or issues, check the troubleshooting section above or examine the test scripts for debugging. The framework is designed to be flexible and configurable for different use cases, from quick development iterations to comprehensive production evaluations.
