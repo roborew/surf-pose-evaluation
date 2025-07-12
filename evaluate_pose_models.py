@@ -1214,7 +1214,7 @@ USAGE RECOMMENDATIONS:
                                 "_optimized", ""
                             )
 
-                            # Look for existing prediction file
+                            # Look for existing prediction file (try new format first, then old format)
                             prediction_file_path = (
                                 self.prediction_handler.get_prediction_file_path(
                                     base_model_name, maneuver.maneuver_id
@@ -1231,6 +1231,30 @@ USAGE RECOMMENDATIONS:
                             print(
                                 f"    📄 File exists: {Path(prediction_file_path).exists()}"
                             )
+
+                            # Check if new format exists
+                            if Path(prediction_file_path).exists():
+                                print(
+                                    f"    ✅ Found prediction file in new format (model folder)"
+                                )
+                            else:
+                                # Try old format for backward compatibility
+                                base_path = Path(prediction_file_path).parent.parent
+                                old_filename = f"{base_model_name}_{maneuver.maneuver_id}_predictions.json"
+                                old_prediction_file_path = base_path / old_filename
+
+                                if old_prediction_file_path.exists():
+                                    prediction_file_path = str(old_prediction_file_path)
+                                    print(
+                                        f"    ✅ Found prediction file in old format (root folder)"
+                                    )
+                                    print(
+                                        f"    📂 Old format path: {prediction_file_path}"
+                                    )
+                                else:
+                                    print(
+                                        f"    ❌ No prediction file found in either format"
+                                    )
 
                             if Path(prediction_file_path).exists():
                                 logging.info(

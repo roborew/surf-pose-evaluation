@@ -1,0 +1,60 @@
+name: surf_pose_eval
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Core Python and essential packages
+  - python=3.10
+  - numpy=1.24.3
+  - pandas=2.0.3
+  - pyyaml=6.0
+  - tqdm=4.65.0
+
+  # PyTorch ecosystem - minimal set
+  - pytorch=2.0.1
+  - torchvision=0.15.2
+  - pytorch-cuda=11.8
+
+  # Essential scientific packages
+  - matplotlib=3.7.2
+  - scikit-learn=1.3.0
+
+  # Video processing
+  - ffmpeg=6.0
+
+  # Install everything else via pip
+  - pip=23.2.1
+  - pip:
+      # OpenCV via pip
+      - opencv-python==4.8.0.76
+
+      # Core ML packages
+      - scipy==1.11.1
+      - seaborn==0.12.2
+      - imageio==2.31.1
+
+      # MLflow and experiment tracking
+      - mlflow==2.5.0
+      - optuna==3.2.0
+
+      # MediaPipe
+      - mediapipe==0.10.3
+
+      # YOLOv8
+      - ultralytics==8.0.134
+
+      # Utilities
+      - rich==13.4.2
+      - pillow==10.0.0
+      - psutil==5.9.5
+
+      # Development tools
+      - pytest==7.4.0
+      - jupyter==1.0.0
+
+variables:
+  CUDA_VISIBLE_DEVICES: "0"
+  PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:512"

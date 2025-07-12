@@ -330,10 +330,13 @@ class PredictionFileHandler:
             Path to saved file
         """
         if output_path is None:
-            filename = (
-                f"{prediction.model_name}_{prediction.maneuver_id}_predictions.json"
-            )
-            output_path = self.base_path / filename
+            # Create model-specific subdirectory
+            model_dir = self.base_path / prediction.model_name
+            model_dir.mkdir(parents=True, exist_ok=True)
+
+            # Remove model name from filename since it's now in the directory
+            filename = f"{prediction.maneuver_id}_predictions.json"
+            output_path = model_dir / filename
         else:
             output_path = Path(output_path)
 
@@ -429,8 +432,18 @@ class PredictionFileHandler:
         else:
             path = self.base_path
 
-        filename = f"{model_name}_{maneuver_id}_predictions.json"
-        return str(path / filename)
+        # Look in model-specific subdirectory first (new format)
+        model_dir = path / model_name
+        new_filename = f"{maneuver_id}_predictions.json"
+        new_path = model_dir / new_filename
+
+        # Fallback to old format for backward compatibility
+        old_filename = f"{model_name}_{maneuver_id}_predictions.json"
+        old_path = path / old_filename
+
+        # Return new path (even if it doesn't exist yet, for new files)
+        # The visualization system will check existence
+        return str(new_path)
 
     def list_prediction_files(
         self, model_name: Optional[str] = None, maneuver_type: Optional[str] = None
@@ -444,11 +457,28 @@ class PredictionFileHandler:
         Returns:
             List of prediction file paths
         """
-        pattern = "*.json"
-        if model_name:
-            pattern = f"{model_name}_*.json"
+        files = []
 
-        files = list(self.base_path.glob(pattern))
+        if model_name:
+            # Look in model-specific directory (new format)
+            model_dir = self.base_path / model_name
+            if model_dir.exists():
+                files.extend(model_dir.glob("*_predictions.json"))
+
+            # Also check old format for backward compatibility
+            old_pattern = f"{model_name}_*_predictions.json"
+            files.extend(self.base_path.glob(old_pattern))
+        else:
+            # Search all model directories (new format)
+            for model_dir in self.base_path.iterdir():
+                if model_dir.is_dir():
+                    files.extend(model_dir.glob("*_predictions.json"))
+
+            # Also check old format files in root
+            files.extend(self.base_path.glob("*_*_predictions.json"))
+
+        # Remove duplicates
+        files = list(set(files))
 
         if maneuver_type:
             # Filter by maneuver type (requires loading files)
