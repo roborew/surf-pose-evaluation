@@ -309,6 +309,67 @@ def test_prediction_file_listing():
         print("  ✅ Prediction file listing test passed")
 
 
+def test_new_prediction_file_naming():
+    """Test new prediction file naming format with maneuver type and score"""
+    print("Testing new prediction file naming format...")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        handler = PredictionFileHandler(temp_dir)
+
+        # Create mock data with specific maneuver details
+        mock_maneuver = create_mock_maneuver()
+        mock_maneuver.maneuver_type = "Pumping"
+        mock_maneuver.execution_score = 8.0
+        mock_maneuver.file_path = "data/test/C0010_clip_4.mp4"
+
+        model_name = "yolov8_pose"
+        model_config = {"confidence_threshold": 0.5}
+        keypoint_format = get_keypoint_format_for_model(model_name)
+        keypoint_names = get_keypoint_names_for_model(model_name)
+
+        # Create frame prediction
+        mock_pose_result = create_mock_pose_result()
+        frame_pred = handler.convert_model_prediction_to_standard(
+            model_result=mock_pose_result,
+            frame_id=0,
+            absolute_frame_id=250,
+            timestamp=10.0,
+            keypoint_format=keypoint_format,
+            keypoint_names=keypoint_names,
+        )
+
+        # Create and save maneuver prediction
+        maneuver_prediction = handler.create_maneuver_prediction(
+            maneuver=mock_maneuver,
+            model_name=model_name,
+            model_config=model_config,
+            keypoint_format=keypoint_format,
+            keypoint_names=keypoint_names,
+            frame_predictions=[frame_pred],
+        )
+
+        # Save to file
+        saved_path = handler.save_prediction_file(maneuver_prediction)
+
+        # Check that the filename follows the new format
+        expected_filename = "maneuver_Pumping_08_C0010_clip_4_predictions.json"
+        assert Path(saved_path).name == expected_filename
+
+        # Test the new path generation method
+        new_path = handler.get_prediction_file_path_with_details(
+            model_name, "Pumping", 8.0, "data/test/C0010_clip_4.mp4"
+        )
+        assert Path(new_path).name == expected_filename
+
+        # Test that we can load the file
+        loaded_prediction = handler.load_prediction_file(saved_path)
+        assert loaded_prediction.maneuver_type == "Pumping"
+        assert loaded_prediction.execution_score == 8.0
+
+        print("  ✅ New prediction file naming format test passed")
+        print(f"  📁 Generated filename: {expected_filename}")
+
+
 def main():
     """Run all tests"""
     print("🧪 Testing Standardized Prediction File System")
@@ -320,6 +381,7 @@ def main():
         test_maneuver_prediction_creation()
         test_prediction_file_save_load()
         test_prediction_file_listing()
+        test_new_prediction_file_naming()
 
         print("\n✅ All tests passed!")
         print("The standardized prediction file system is working correctly.")

@@ -334,8 +334,15 @@ class PredictionFileHandler:
             model_dir = self.base_path / prediction.model_name
             model_dir.mkdir(parents=True, exist_ok=True)
 
-            # Remove model name from filename since it's now in the directory
-            filename = f"{prediction.maneuver_id}_predictions.json"
+            # Format execution score as 2-digit integer (e.g., 05, 10)
+            execution_score_str = f"{int(prediction.execution_score):02d}"
+
+            # Extract video stem from video path for consistency with visualizations
+            video_stem = Path(prediction.video_path).stem
+
+            # Create filename that matches visualization pattern:
+            # maneuver_{type}_{score}_{video_stem}_predictions.json
+            filename = f"maneuver_{prediction.maneuver_type}_{execution_score_str}_{video_stem}_predictions.json"
             output_path = model_dir / filename
         else:
             output_path = Path(output_path)
@@ -434,16 +441,67 @@ class PredictionFileHandler:
 
         # Look in model-specific subdirectory first (new format)
         model_dir = path / model_name
-        new_filename = f"{maneuver_id}_predictions.json"
-        new_path = model_dir / new_filename
 
-        # Fallback to old format for backward compatibility
-        old_filename = f"{model_name}_{maneuver_id}_predictions.json"
-        old_path = path / old_filename
+        # Try new format first (with maneuver type and score)
+        # We'll need to search for files that match the pattern since we don't have
+        # the maneuver type and score from just the maneuver_id
+        if model_dir.exists():
+            # Search for files matching the pattern with the maneuver_id
+            pattern = f"*{maneuver_id.split('_')[-1]}_predictions.json"
+            matching_files = list(model_dir.glob(pattern))
+            if matching_files:
+                return str(matching_files[0])  # Return first match
+
+        # Fallback to old format
+        old_filename = f"{maneuver_id}_predictions.json"
+        new_path = model_dir / old_filename
+
+        # Also check very old format for backward compatibility
+        old_filename_with_model = f"{model_name}_{maneuver_id}_predictions.json"
+        old_path = path / old_filename_with_model
 
         # Return new path (even if it doesn't exist yet, for new files)
         # The visualization system will check existence
         return str(new_path)
+
+    def get_prediction_file_path_with_details(
+        self,
+        model_name: str,
+        maneuver_type: str,
+        execution_score: float,
+        video_path: str,
+        base_path: Optional[str] = None,
+    ) -> str:
+        """Get prediction file path with full details for new naming format
+
+        Args:
+            model_name: Name of the pose estimation model
+            maneuver_type: Type of maneuver (e.g., "Pumping")
+            execution_score: Execution score (will be formatted as 2-digit integer)
+            video_path: Path to the video file
+            base_path: Optional base path override
+
+        Returns:
+            Standardized file path with new naming format
+        """
+        if base_path:
+            path = Path(base_path)
+        else:
+            path = self.base_path
+
+        # Create model-specific subdirectory path
+        model_dir = path / model_name
+
+        # Format execution score as 2-digit integer
+        execution_score_str = f"{int(execution_score):02d}"
+
+        # Extract video stem from video path
+        video_stem = Path(video_path).stem
+
+        # Create filename that matches visualization pattern
+        filename = f"maneuver_{maneuver_type}_{execution_score_str}_{video_stem}_predictions.json"
+
+        return str(model_dir / filename)
 
     def list_prediction_files(
         self, model_name: Optional[str] = None, maneuver_type: Optional[str] = None
@@ -463,31 +521,46 @@ class PredictionFileHandler:
             # Look in model-specific directory (new format)
             model_dir = self.base_path / model_name
             if model_dir.exists():
+                # New format: maneuver_{type}_{score}_{video_stem}_predictions.json
+                files.extend(model_dir.glob("maneuver_*_predictions.json"))
+                # Old format: {maneuver_id}_predictions.json
                 files.extend(model_dir.glob("*_predictions.json"))
 
-            # Also check old format for backward compatibility
+            # Also check very old format for backward compatibility
             old_pattern = f"{model_name}_*_predictions.json"
             files.extend(self.base_path.glob(old_pattern))
         else:
             # Search all model directories (new format)
             for model_dir in self.base_path.iterdir():
                 if model_dir.is_dir():
+                    # New format: maneuver_{type}_{score}_{video_stem}_predictions.json
+                    files.extend(model_dir.glob("maneuver_*_predictions.json"))
+                    # Old format: {maneuver_id}_predictions.json
                     files.extend(model_dir.glob("*_predictions.json"))
 
-            # Also check old format files in root
+            # Also check very old format files in root
             files.extend(self.base_path.glob("*_*_predictions.json"))
 
         # Remove duplicates
         files = list(set(files))
 
         if maneuver_type:
-            # Filter by maneuver type (requires loading files)
+            # Filter by maneuver type
             filtered_files = []
             for file_path in files:
                 try:
-                    prediction = self.load_prediction_file(str(file_path))
-                    if prediction.maneuver_type == maneuver_type:
+                    # Check if it's the new format first (faster)
+                    filename = Path(file_path).name
+                    if (
+                        filename.startswith("maneuver_")
+                        and f"_{maneuver_type}_" in filename
+                    ):
                         filtered_files.append(str(file_path))
+                    else:
+                        # Fallback to loading the file to check maneuver type
+                        prediction = self.load_prediction_file(str(file_path))
+                        if prediction.maneuver_type == maneuver_type:
+                            filtered_files.append(str(file_path))
                 except Exception as e:
                     logger.warning(f"Could not load {file_path}: {e}")
             return filtered_files

@@ -74,6 +74,7 @@ surf_pose_evaluation/
 **MLflow Experiment**: `surf_pose_production_optuna`
 
 **Key Features**:
+
 - Uses subset of data (50 clips) for speed
 - Runs 50 trials per model by default
 - Saves best parameters to `results/best_params/`
@@ -81,6 +82,7 @@ surf_pose_evaluation/
 - Minimal visualization for speed
 
 **Run Types**:
+
 - `{model}_optuna_trial_XXX`: Individual optimization trials
 - `{model}_optuna_summary`: Aggregated optimization statistics
 - `{model}_optuna_best_full_eval`: Best configuration on full data
@@ -94,6 +96,7 @@ surf_pose_evaluation/
 **MLflow Experiment**: `surf_pose_production_comparison`
 
 **Key Features**:
+
 - Uses full dataset (200 clips)
 - Loads best parameters from Phase 1
 - Comprehensive metrics and visualizations
@@ -101,17 +104,18 @@ surf_pose_evaluation/
 - Generates prediction files
 
 **Run Types**:
+
 - `{model}_evaluation_optimized`: Final model evaluation with best params
 
 ## 🎯 Available Models
 
-| Model | Wrapper | Status | Notes |
-|-------|---------|--------|-------|
-| MediaPipe | `MediaPipeWrapper` | ✅ Always available | CPU-optimized, fast |
-| BlazePose | `BlazePoseWrapper` | ⚠️ Optional | GPU-accelerated |
-| YOLOv8-Pose | `YOLOv8Wrapper` | ⚠️ Optional | Real-time detection |
-| PyTorch Pose | `PyTorchPoseWrapper` | ⚠️ Optional | KeypointRCNN |
-| MMPose | `MMPoseWrapper` | ⚠️ Optional | Research models |
+| Model        | Wrapper              | Status              | Notes               |
+| ------------ | -------------------- | ------------------- | ------------------- |
+| MediaPipe    | `MediaPipeWrapper`   | ✅ Always available | CPU-optimized, fast |
+| BlazePose    | `BlazePoseWrapper`   | ⚠️ Optional         | GPU-accelerated     |
+| YOLOv8-Pose  | `YOLOv8Wrapper`      | ⚠️ Optional         | Real-time detection |
+| PyTorch Pose | `PyTorchPoseWrapper` | ⚠️ Optional         | KeypointRCNN        |
+| MMPose       | `MMPoseWrapper`      | ⚠️ Optional         | Research models     |
 
 ## 📊 MLflow Experiments
 
@@ -120,11 +124,13 @@ surf_pose_evaluation/
 The framework creates separate MLflow experiments for different purposes:
 
 1. **`surf_pose_production_optuna`**: Hyperparameter optimization
+
    - Trial runs: Individual parameter combinations
    - Summary runs: Optimization statistics
    - Best eval runs: Full evaluation with best parameters
 
 2. **`surf_pose_production_comparison`**: Final model comparison
+
    - Evaluation runs: Production-ready model comparisons
    - Uses optimized parameters from Phase 1
 
@@ -139,6 +145,7 @@ mlflow ui --backend-store-uri ./results/mlruns --port 5000
 ```
 
 Navigate to http://localhost:5000 to explore:
+
 - Model performance comparisons
 - Hyperparameter optimization progress
 - Detailed metrics and visualizations
@@ -149,6 +156,7 @@ Navigate to http://localhost:5000 to explore:
 ### Production Configurations
 
 #### `evaluation_config_production_optuna.yaml`
+
 - **Purpose**: Hyperparameter optimization
 - **Dataset**: Subset (50 clips) for speed
 - **Optuna**: Enabled with 50 trials
@@ -156,6 +164,7 @@ Navigate to http://localhost:5000 to explore:
 - **Experiment**: `surf_pose_production_optuna`
 
 #### `evaluation_config_production_comparison.yaml`
+
 - **Purpose**: Model comparison with best parameters
 - **Dataset**: Full dataset (200 clips)
 - **Optuna**: Disabled
@@ -166,6 +175,7 @@ Navigate to http://localhost:5000 to explore:
 ### Development Configurations
 
 #### `evaluation_config.yaml`
+
 - **Purpose**: Development and testing
 - **Dataset**: Configurable size
 - **Optuna**: Optional
@@ -179,18 +189,18 @@ Edit model config files in `configs/model_configs/{model_name}.yaml`:
 
 ```yaml
 # Example: yolov8_pose.yaml
-model_size: "n"  # Default value
+model_size: "n" # Default value
 
 optuna_search_space:
   model_size:
     type: "categorical"
     choices: ["n", "s", "m", "l", "x"]
-  
+
   conf:
     type: "uniform"
     low: 0.1
     high: 0.9
-  
+
   iou:
     type: "uniform"
     low: 0.3
@@ -209,6 +219,7 @@ optuna_search_space:
 Primary objective: **PCK@0.2** (Percentage of Correct Keypoints at 0.2 threshold)
 
 Secondary considerations:
+
 - Inference speed (FPS)
 - Memory usage
 - Detection accuracy
@@ -230,11 +241,11 @@ Secondary considerations:
 
 ### Interpretation Guidelines
 
-| Metric | Good | Acceptable | Poor |
-|--------|------|------------|------|
-| PCK@0.2 | >0.7 | 0.5-0.7 | <0.5 |
-| FPS | >15 | 10-15 | <10 |
-| Detection F1 | >0.8 | 0.6-0.8 | <0.6 |
+| Metric       | Good | Acceptable | Poor |
+| ------------ | ---- | ---------- | ---- |
+| PCK@0.2      | >0.7 | 0.5-0.7    | <0.5 |
+| FPS          | >15  | 10-15      | <10  |
+| Detection F1 | >0.8 | 0.6-0.8    | <0.6 |
 
 ## 🎥 Visualization and Outputs
 
@@ -243,16 +254,47 @@ Secondary considerations:
 Location: `results/predictions/{model_name}/`
 
 Format: Standardized JSON with:
+
 - Frame-by-frame keypoint predictions
 - Confidence scores
 - Bounding boxes
 - Metadata (model config, timing)
+
+**New Aligned Naming Structure:**
+
+Predictions and visualizations now use the same naming pattern for easy correlation:
+
+```
+# Prediction files
+results/predictions/{model_name}/maneuver_{type}_{score}_{video_stem}_predictions.json
+
+# Visualization files
+results/visualizations/{timestamp}_{model_name}/maneuver_{type}_{score}_{video_stem}_poses.mp4
+```
+
+**Example:**
+
+```
+# Prediction
+results/predictions/yolov8_pose/maneuver_Pumping_08_C0010_clip_4_predictions.json
+
+# Corresponding visualization
+results/visualizations/20240315_143022_yolov8_pose/maneuver_Pumping_08_C0010_clip_4_poses.mp4
+```
+
+This makes it easy to:
+
+- ✅ Identify maneuver type and execution score from filename
+- ✅ Match predictions with their corresponding visualizations
+- ✅ Sort files by score or maneuver type
+- ✅ Quickly find specific maneuvers
 
 ### Visualization Videos
 
 Location: `results/visualizations/` or shared storage
 
 Features:
+
 - Pose overlay on original footage
 - Keypoint connections
 - Confidence visualization
@@ -331,6 +373,7 @@ The automated pipeline generates:
 ### Common Issues
 
 **MLflow UI not starting**:
+
 ```bash
 # Check if port is in use
 lsof -i :5000
@@ -339,16 +382,19 @@ mlflow ui --backend-store-uri ./results/mlruns --port 5001
 ```
 
 **CUDA out of memory**:
+
 - Reduce batch size in model configs
 - Use smaller models (e.g., YOLOv8n instead of YOLOv8x)
 - Enable mixed precision training
 
 **Missing prediction files**:
+
 - Check `results/predictions/` directory
 - Verify model ran successfully in MLflow
 - Check logs for prediction generation errors
 
 **Optuna optimization fails**:
+
 - Verify search space configuration
 - Check model config files exist
 - Ensure sufficient disk space for trials
@@ -356,11 +402,13 @@ mlflow ui --backend-store-uri ./results/mlruns --port 5001
 ### Performance Optimization
 
 **Speed up evaluation**:
+
 - Use `--max-clips` to limit dataset size
 - Disable visualization during optimization
 - Use faster video formats (h264 vs ffv1)
 
 **Reduce memory usage**:
+
 - Process clips sequentially
 - Clear GPU cache between models
 - Use CPU-only models for large datasets
@@ -393,6 +441,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 🆘 Support
 
 For issues and questions:
+
 - Check the troubleshooting section above
 - Review MLflow logs for detailed error messages
 - Open an issue on GitHub with:

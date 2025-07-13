@@ -246,29 +246,35 @@ class PoseEvaluator:
         load_config = self.config.get("models", {}).get("load_best_params", {})
         if not load_config.get("enabled", False):
             return {}
-        
+
         source_path = load_config.get("source_path", "./results/best_params")
         best_params_file = Path(source_path) / "best_parameters.yaml"
-        
+
         if not best_params_file.exists():
             if load_config.get("fallback_to_defaults", True):
-                logging.warning(f"Best parameters file not found: {best_params_file}, using defaults")
+                logging.warning(
+                    f"Best parameters file not found: {best_params_file}, using defaults"
+                )
                 return {}
             else:
-                raise FileNotFoundError(f"Best parameters file not found: {best_params_file}")
-        
+                raise FileNotFoundError(
+                    f"Best parameters file not found: {best_params_file}"
+                )
+
         try:
-            with open(best_params_file, 'r') as f:
+            with open(best_params_file, "r") as f:
                 all_best_params = yaml.safe_load(f)
-            
+
             model_params = all_best_params.get(model_name, {})
             if model_params:
                 logging.info(f"Loaded best parameters for {model_name}: {model_params}")
             else:
-                logging.warning(f"No best parameters found for {model_name} in {best_params_file}")
-            
+                logging.warning(
+                    f"No best parameters found for {model_name} in {best_params_file}"
+                )
+
             return model_params
-            
+
         except Exception as e:
             if load_config.get("fallback_to_defaults", True):
                 logging.warning(f"Failed to load best parameters: {e}, using defaults")
@@ -289,10 +295,10 @@ class PoseEvaluator:
 
         # Load best parameters from Optuna if available
         best_params = self._load_best_params_from_optuna(model_name)
-        
+
         # Merge configurations: best_params override model_config
         final_config = {**model_config, **best_params}
-        
+
         # Log parameter source
         if best_params:
             logging.info(f"Using optimized parameters for {model_name}: {best_params}")
@@ -309,7 +315,7 @@ class PoseEvaluator:
         run_name = f"{model_name}_evaluation"
         if best_params:
             run_name = f"{model_name}_evaluation_optimized"
-            
+
         with mlflow.start_run(run_name=run_name):
             # Log model parameters (safely handle long strings)
             safe_config = self._sanitize_mlflow_params(final_config)
@@ -361,12 +367,14 @@ USAGE RECOMMENDATIONS:
             mlflow.log_param("model_name", model_name)
             mlflow.log_param("parameter_source", param_source)
             mlflow.log_param("optimization_mode", "standard_evaluation")
-            mlflow.log_param("data_scope", f"complete_dataset_{len(maneuvers)}_maneuvers")
+            mlflow.log_param(
+                "data_scope", f"complete_dataset_{len(maneuvers)}_maneuvers"
+            )
             mlflow.log_param("purpose", "model_evaluation")
-            
+
             # Log whether optimized parameters were used
             mlflow.log_param("uses_optimized_params", bool(best_params))
-            
+
             # Log configuration parameters
             for param_name, param_value in safe_config.items():
                 mlflow.log_param(param_name, param_value)
@@ -1212,11 +1220,12 @@ USAGE RECOMMENDATIONS:
                                 "_optimized", ""
                             )
 
-                            # Look for existing prediction file (try new format first, then old format)
-                            prediction_file_path = (
-                                self.prediction_handler.get_prediction_file_path(
-                                    base_model_name, maneuver.maneuver_id
-                                )
+                            # Try new format first (with maneuver details)
+                            prediction_file_path = self.prediction_handler.get_prediction_file_path_with_details(
+                                base_model_name,
+                                maneuver.maneuver_type,
+                                maneuver.execution_score,
+                                maneuver.file_path,
                             )
 
                             print(
@@ -1233,26 +1242,41 @@ USAGE RECOMMENDATIONS:
                             # Check if new format exists
                             if Path(prediction_file_path).exists():
                                 print(
-                                    f"    ✅ Found prediction file in new format (model folder)"
+                                    f"    ✅ Found prediction file in new format (with maneuver details)"
                                 )
                             else:
-                                # Try old format for backward compatibility
-                                base_path = Path(prediction_file_path).parent.parent
-                                old_filename = f"{base_model_name}_{maneuver.maneuver_id}_predictions.json"
-                                old_prediction_file_path = base_path / old_filename
-
-                                if old_prediction_file_path.exists():
-                                    prediction_file_path = str(old_prediction_file_path)
-                                    print(
-                                        f"    ✅ Found prediction file in old format (root folder)"
+                                # Fallback to old method for backward compatibility
+                                fallback_path = (
+                                    self.prediction_handler.get_prediction_file_path(
+                                        base_model_name, maneuver.maneuver_id
                                     )
+                                )
+
+                                if Path(fallback_path).exists():
+                                    prediction_file_path = fallback_path
                                     print(
-                                        f"    📂 Old format path: {prediction_file_path}"
+                                        f"    ✅ Found prediction file in old format (model folder)"
                                     )
                                 else:
-                                    print(
-                                        f"    ❌ No prediction file found in either format"
-                                    )
+                                    # Try very old format for backward compatibility
+                                    base_path = Path(fallback_path).parent.parent
+                                    old_filename = f"{base_model_name}_{maneuver.maneuver_id}_predictions.json"
+                                    old_prediction_file_path = base_path / old_filename
+
+                                    if old_prediction_file_path.exists():
+                                        prediction_file_path = str(
+                                            old_prediction_file_path
+                                        )
+                                        print(
+                                            f"    ✅ Found prediction file in very old format (root folder)"
+                                        )
+                                        print(
+                                            f"    📂 Very old format path: {prediction_file_path}"
+                                        )
+                                    else:
+                                        print(
+                                            f"    ❌ No prediction file found in any format"
+                                        )
 
                             if Path(prediction_file_path).exists():
                                 logging.info(
