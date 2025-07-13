@@ -72,9 +72,10 @@ except ImportError:
 class PoseEvaluator:
     """Main evaluation class for pose estimation models"""
 
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, video_format_override: str = None):
         """Initialize evaluator with configuration"""
         self.config = self._load_config(config_path)
+        self.video_format_override = video_format_override
         self.device = self._setup_device()
 
         # Initialize components
@@ -175,13 +176,21 @@ class PoseEvaluator:
         """Get list of available model names"""
         return list(self.model_registry.keys())
 
+    def _get_video_format(self) -> str:
+        """Get video format to use, with command-line override support"""
+        if self.video_format_override:
+            return self.video_format_override
+        return self.config["dataset"]["video_clips"].get("input_format", "h264")
+
     def quick_screening(self, models: List[str], num_clips: int = 50) -> Dict:
         """Quick screening evaluation with limited data"""
         logging.info(f"Starting quick screening with {num_clips} clips")
 
         # Load limited dataset - use maneuvers instead of full clips
+        video_format = self._get_video_format()
+        logging.info(f"Using video format: {video_format}")
         maneuvers = self.data_loader.load_maneuvers(
-            max_clips=num_clips, maneuvers_per_clip=1
+            max_clips=num_clips, maneuvers_per_clip=1, video_format=video_format
         )
         logging.info(f"Loaded {len(maneuvers)} maneuvers for quick screening")
 
@@ -207,7 +216,11 @@ class PoseEvaluator:
         logging.info("Starting full evaluation")
 
         # Load full dataset - use maneuvers instead of full clips
-        maneuvers = self.data_loader.load_maneuvers(max_clips=num_clips)
+        video_format = self._get_video_format()
+        logging.info(f"Using video format: {video_format}")
+        maneuvers = self.data_loader.load_maneuvers(
+            max_clips=num_clips, video_format=video_format
+        )
         logging.info(f"Loaded {len(maneuvers)} maneuvers for full evaluation")
 
         results = {}
@@ -1517,6 +1530,11 @@ def main():
         help="Use Optuna for hyperparameter optimization",
     )
     parser.add_argument(
+        "--video-format",
+        choices=["h264", "ffv1"],
+        help="Override video format for input (h264 or ffv1). If not specified, uses config file setting.",
+    )
+    parser.add_argument(
         "--output",
         default="results/pose_comparison_results.json",
         help="Output file path",
@@ -1529,7 +1547,7 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
 
     # Initialize evaluator
-    evaluator = PoseEvaluator(args.config)
+    evaluator = PoseEvaluator(args.config, video_format_override=args.video_format)
 
     # Determine models to evaluate
     if args.models:

@@ -14,6 +14,8 @@ dataset:
   video_clips:
     h264_path: "03_CLIPPED/h264"
     ffv1_path: "03_CLIPPED/ffv1"
+    # Input video format for inference (use high quality for production)
+    input_format: "ffv1" # Options: "h264", "ffv1"
   annotations:
     labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
     sony_300_labels: "sony_300"
@@ -115,17 +117,28 @@ output:
     # Shared storage for production
     shared_storage_path: "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE"
 
-    # PRODUCTION VIDEO ENCODING - LOSSLESS MKV
     encoding:
-      format: "lossless" # Lossless H.264 for production testing
+      format: "h264" # h264, h265, prores, ffv1, lossless
       quality:
-        crf: 0 # Lossless encoding
-        preset: "veryslow" # Best compression efficiency
-      pixel_format: "yuv444p" # Full chroma resolution
+        crf: 23 # 18-28 for good quality, lower = better quality
+        preset: "fast" # ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
+      pixel_format: "yuv420p"
       audio:
         enabled: true
-        codec: "copy" # Preserve original audio
-      container: "mkv" # MKV container for lossless
+        codec: "copy" # copy, aac, mp3
+      container: "mp4" # mp4, mkv, avi, mov
+
+    # PRODUCTION VIDEO ENCODING - LOSSLESS MKV
+    # encoding:
+    #   format: "lossless" # Lossless H.264 for production testing
+    #   quality:
+    #     crf: 0 # Lossless encoding
+    #     preset: "veryslow" # Best compression efficiency
+    #   pixel_format: "yuv444p" # Full chroma resolution
+    #   audio:
+    #     enabled: true
+    #     codec: "copy" # Preserve original audio
+    #   container: "mkv" # MKV container for lossless
 
   # Alternative encoding options for different use cases:
   #

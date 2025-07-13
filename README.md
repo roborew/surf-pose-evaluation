@@ -402,6 +402,11 @@ python evaluate_pose_models.py \
 python evaluate_pose_models.py \
     --config configs/evaluation_config.yaml \
     --models mediapipe --use-optuna
+
+# Video format selection (override config setting)
+python evaluate_pose_models.py \
+    --config configs/evaluation_config.yaml \
+    --models mediapipe --video-format ffv1
 ```
 
 ## Visualization Features
@@ -430,6 +435,28 @@ data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/
 │       ├── clip_1_C0019_clip_1_poses.mp4
 │       └── visualization_metadata.json
 ```
+
+### Video Format Configuration
+
+**Input Video Format (for inference):**
+Configure in config file or override with `--video-format`:
+
+```yaml
+# In config file
+dataset:
+  video_clips:
+    input_format: "ffv1"  # or "h264"
+```
+
+```bash
+# Command line override
+python evaluate_pose_models.py --video-format ffv1
+```
+
+**Recommendations:**
+- **Production/Research**: Use `ffv1` for highest quality inference
+- **Development/Testing**: Use `h264` for faster loading
+- **Visualization Output**: Always uses efficient H.264 encoding
 
 ### Video Format Options
 

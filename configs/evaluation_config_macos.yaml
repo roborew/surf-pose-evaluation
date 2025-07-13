@@ -17,6 +17,8 @@ dataset:
   video_clips:
     h264_path: "03_CLIPPED/h264"
     ffv1_path: "03_CLIPPED/ffv1" # Available on training machines
+    # Input video format for inference (h264 for macOS development)
+    input_format: "h264" # Options: "h264", "ffv1"
 
   # Annotation sources
   annotations:
