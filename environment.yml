@@ -6,104 +6,67 @@ channels:
   - defaults
 
 dependencies:
-  # Core Python and scientific computing
-  - python=3.9
-  - numpy=1.24.3
-  - scipy=1.11.1
-  - pandas=2.0.3
-  - matplotlib=3.7.2
-  - seaborn=0.12.2
-  - opencv=4.8.0
-  - scikit-learn=1.3.0
-  - tqdm=4.65.0
-  - pyyaml=6.0
-
-  # PyTorch ecosystem
-  - pytorch=2.0.1
-  - torchvision=0.15.2
-  - torchaudio=2.0.2
+  # Core Python and system
+  - python=3.10
+  - pip
+  - setuptools
+  - wheel
+  
+  # CUDA and PyTorch ecosystem
+  - pytorch=2.1.*
+  - torchvision=0.16.*
+  - torchaudio=2.1.*
   - pytorch-cuda=11.8
   - cudatoolkit=11.8
-
-  # Video processing
-  - ffmpeg=6.0
-  - imageio=2.31.1
-  - imageio-ffmpeg=0.4.8
-
-  # MLflow and experiment tracking
-  - mlflow=2.5.0
-  - optuna=3.2.0
-
-  # Jupyter for development
-  - jupyter=1.0.0
-  - ipykernel=6.24.0
-
-  # Development tools
-  - black=23.7.0
-  - flake8=6.0.0
-  - pytest=7.4.0
-
-  # GPU monitoring
-  - nvidia-ml-py=12.535.77
-
-  # Pip dependencies for pose estimation libraries
-  - pip=23.2.1
+  
+  # Core ML and scientific computing
+  - numpy>=1.24,<1.25
+  - scipy>=1.11,<1.12
+  - scikit-learn>=1.3,<1.4
+  - pandas>=2.0,<2.1
+  - matplotlib>=3.7,<3.8
+  - seaborn>=0.12,<0.13
+  - pillow>=9.0,<10.0
+  
+  # Media processing
+  - ffmpeg>=6.0
+  - imageio>=2.31
+  - imageio-ffmpeg>=0.4
+  
+  # Code quality and testing
+  - black>=23.0
+  - flake8>=6.0
+  - pytest>=7.0
+  - pytest-cov>=4.0
+  
+  # Visualization
+  - plotly>=5.15
+  
+  # ML experiment tracking and optimization
+  - mlflow>=2.5
+  - optuna>=3.2
+  - tensorboard>=2.13
+  
+  # Pose estimation dependencies
+  - cython>=0.29
+  - pyyaml>=6.0
+  - requests>=2.31
+  - tqdm>=4.65
+  - terminaltables>=3.1
+  
+  # Additional utilities
+  - click>=8.1
+  - colorama>=0.4
+  - rich>=13.0
+  - typer>=0.9
+  
+  # Pip dependencies for pose estimation packages
   - pip:
-      # MMPose and MMDetection ecosystem
-      - mmengine==0.8.4
-      - mmcv==2.0.1
-      - mmdet==3.1.0
-      - mmpose==1.1.0
-      - xtcocotools==1.14.1
-
-      # MediaPipe (use latest stable version)
-      - mediapipe==0.10.21
-
-      # YOLOv8 (Ultralytics)
-      - ultralytics==8.0.134
-
-      # OpenPose (Python wrapper)
-      - openpose-python==0.0.1.2
-
-      # Additional pose estimation utilities
-      - alphapose==0.5.0
-
-      # BlazePose (through MediaPipe)
-      - protobuf==3.20.3
-
-      # MMPose framework (includes HRNet and other backbones)
-      - timm==0.9.2
-
-      # Video and image processing
-      - decord==0.6.0
-      - pillow==10.0.0
-
-      # Additional utilities
-      - rich==13.4.2
-      - typer==0.9.0
-      - wandb==0.15.8
-      - tensorboard==2.13.0
-
-      # Memory profiling
-      - pympler==0.9
-      - psutil==5.9.5
-
-      # Configuration management
-      - hydra-core==1.3.2
-      - omegaconf==2.3.0
-
-      # Pose-specific metrics
-      - pose-evaluation==0.1.0
-
-variables:
-  # CUDA environment variables
-  CUDA_VISIBLE_DEVICES: "0"
-  PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:512"
-
-  # OpenPose paths (update these based on your OpenPose installation)
-  OPENPOSE_ROOT: "/opt/openpose"
-  PYTHONPATH: "/opt/openpose/python:$PYTHONPATH"
-
-  # MMPose model cache
-  TORCH_HOME: "~/.cache/torch"
-  MMPOSE_CACHE_DIR: "~/.cache/mmpose"
+    - opencv-python==4.8.0.76
+    - mmengine==0.8.4
+    - mmcv==2.0.1
+    - mmpose==1.1.0
+    - mmdet==3.1.0
+    - mediapipe==0.10.14
+    - ultralytics==8.0.165
+    - xtcocotools==1.12
