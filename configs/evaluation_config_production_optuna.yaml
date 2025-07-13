@@ -78,20 +78,20 @@ optuna:
   enabled: true
   study_name: "surf_pose_optimization_production"
   direction: "maximize"
-  n_trials: 50
-  timeout_minutes: 180
+  n_trials: 100  # Increased for more thorough optimization
+  timeout_minutes: 300  # 5 hours for comprehensive search
   
   # Optimization target
   objective:
     primary_metric: "pck_0.2"
     secondary_metrics: ["inference_latency_ms", "memory_usage_gb"]
-    weights: [0.7, 0.2, 0.1]
+    weights: [0.8, 0.15, 0.05]  # Prioritize accuracy for surf footage
   
   # Pruning for early stopping
   pruning:
     enabled: true
-    patience: 3
-    min_trials: 5
+    patience: 5  # More patience for complex search space
+    min_trials: 10  # More trials before pruning starts
 
 # Hardware configuration
 hardware:

@@ -116,21 +116,21 @@ characteristics:
     - "Consumer applications requiring smooth performance"
     - "Avatar control and motion capture on mobile devices"
 
-# Optuna hyperparameter optimization ranges
+# Optuna hyperparameter optimization ranges - OPTIMIZED FOR SURF FOOTAGE
 optuna_search_space:
   model_complexity:
     type: "categorical"
-    choices: [0, 1, 2] # Lite, Full, Heavy
+    choices: [0, 1, 2] # Lite, Full, Heavy - test all complexities
 
   min_detection_confidence:
     type: "uniform"
-    low: 0.1
-    high: 0.9
+    low: 0.05 # Much lower for challenging surf conditions
+    high: 1.0 # Full range to find optimal confidence threshold
 
   min_tracking_confidence:
     type: "uniform"
-    low: 0.1
-    high: 0.9
+    low: 0.05 # Much lower for challenging surf conditions
+    high: 1.0 # Full range to find optimal confidence threshold
 
   smooth_landmarks:
     type: "categorical"
@@ -139,6 +139,15 @@ optuna_search_space:
   use_alignment_mode:
     type: "categorical"
     choices: [true, false]
+
+  # Additional surf-specific parameters
+  static_image_mode:
+    type: "categorical"
+    choices: [true, false] # Test both modes for surf footage
+
+  enable_segmentation:
+    type: "categorical"
+    choices: [true, false] # Segmentation might help with water spray
 
 # Comparison with MediaPipe
 comparison_with_mediapipe:

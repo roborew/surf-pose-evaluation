@@ -2,25 +2,41 @@ model_name: "pytorch_pose"
 model_class: "PyTorchPoseWrapper"
 
 # PyTorch KeypointRCNN configuration
-confidence_threshold: 0.7
-keypoint_threshold: 0.3
-nms_threshold: 0.3
-max_detections: 10
+confidence_threshold: 0.5 # Will be optimized by Optuna
+keypoint_threshold: 0.2 # Will be optimized by Optuna
+nms_threshold: 0.3 # Will be optimized by Optuna
+max_detections: 10 # Will be optimized by Optuna
 
-# Optuna hyperparameter search space
-optuna_params:
+# Optuna hyperparameter search space - OPTIMIZED FOR SURF FOOTAGE
+optuna_search_space:
   confidence_threshold:
-    type: "float"
-    low: 0.5
-    high: 0.9
-    step: 0.05
+    type: "uniform"
+    low: 0.05 # Much lower for challenging surf conditions
+    high: 1.0 # Full range to find optimal confidence threshold
+
   keypoint_threshold:
-    type: "float"
-    low: 0.1
-    high: 0.6
-    step: 0.1
+    type: "uniform"
+    low: 0.05 # Much lower for challenging conditions
+    high: 1.0 # Full range to find optimal keypoint threshold
+
+  nms_threshold:
+    type: "uniform"
+    low: 0.1 # Lower for overlapping detections
+    high: 0.8
+
   max_detections:
     type: "int"
-    low: 5
-    high: 20
+    low: 5 # Minimum detections
+    high: 25 # Higher for crowded surf conditions
     step: 5
+
+  # Additional surf-specific parameters
+  box_score_thresh:
+    type: "uniform"
+    low: 0.05 # Lower box detection threshold
+    high: 1.0 # Full range to find optimal box score threshold
+
+  box_nms_thresh:
+    type: "uniform"
+    low: 0.1 # Lower NMS threshold for boxes
+    high: 0.8
