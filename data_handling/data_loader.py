@@ -280,8 +280,10 @@ class SurfingDataLoader:
         """
         if video_format == "h264":
             clips_path = self.base_path / self.video_clips_config["h264_path"]
+            file_extension = "*.mp4"
         elif video_format == "ffv1":
             clips_path = self.base_path / self.video_clips_config["ffv1_path"]
+            file_extension = "*.mkv"
         else:
             raise ValueError(f"Unsupported video format: {video_format}")
 
@@ -306,7 +308,7 @@ class SurfingDataLoader:
 
                 session_name = session_dir.name
 
-                for video_file in session_dir.glob("*.mp4"):
+                for video_file in session_dir.glob(file_extension):
                     zoom_level, base_clip_id = self._extract_zoom_info(video_file)
                     group_key = f"{camera_name}_{session_name}_{base_clip_id}"
                     zoom_groups[group_key][zoom_level].append(video_file)
