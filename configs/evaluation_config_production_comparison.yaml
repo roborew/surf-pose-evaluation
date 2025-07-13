@@ -23,7 +23,7 @@ dataset:
     train_ratio: 0.70
     val_ratio: 0.15
     test_ratio: 0.15
-    random_seed: 42  # SAME SEED ensures same data splits
+    random_seed: 42 # SAME SEED ensures same data splits
 
 # Model configuration - USES BEST PARAMS FROM OPTUNA
 models:
@@ -37,7 +37,7 @@ models:
     batch_size: 1
     device: "cuda"
     half_precision: false
-  
+
   # Load optimal parameters from Optuna phase
   load_best_params:
     enabled: true
@@ -51,7 +51,7 @@ evaluation:
     max_duration_seconds: 10
     cameras: ["SONY_300", "SONY_70"]
   comprehensive_test:
-    num_clips: 200  # Full dataset for comparison
+    num_clips: 200 # Full dataset for comparison
     max_duration_seconds: 30
     cameras: ["SONY_300", "SONY_70"]
   metrics:
@@ -69,15 +69,15 @@ evaluation:
 # MLflow configuration - SEPARATE EXPERIMENT
 mlflow:
   enabled: true
-  experiment_name: "surf_pose_production_comparison"  # Different experiment name
-  tracking_uri: "./results/mlruns"
+  experiment_name: "surf_pose_production_comparison" # Different experiment name
+  tracking_uri: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/mlruns"
   logging:
     parameters: true
     metrics: true
     artifacts: true
     models: false
-    log_predictions: true  # Full predictions for comparison
-    log_visualizations: true  # Full visualizations for comparison
+    log_predictions: true # Full predictions for comparison
+    log_visualizations: true # Full visualizations for comparison
     max_videos_per_run: 5
   default_tags:
     project: "surf_pose_evaluation"
@@ -87,7 +87,7 @@ mlflow:
 
 # Optuna configuration - DISABLED FOR COMPARISON
 optuna:
-  enabled: false  # No optimization in comparison phase
+  enabled: false # No optimization in comparison phase
 
 # Hardware configuration
 hardware:
@@ -106,16 +106,16 @@ hardware:
 # Output configuration - FULL PRODUCTION OUTPUT
 output:
   results_dir: "./results"
-  
+
   # Full prediction storage
   predictions:
     enabled: true
     base_path: "predictions"
-    shared_storage_path: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/predictions"
+    shared_storage_path: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/predictions"
     format: "json"
     include_metadata: true
     compress: false
-  
+
   # Full visualization suite
   visualization:
     enabled: true
@@ -123,10 +123,10 @@ output:
     save_keypoint_plots: true
     save_comparison_plots: true
     max_examples_per_model: 10
-    
+
     # Shared storage for production
-    shared_storage_path: "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE"
-    
+    shared_storage_path: "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/visualizations"
+
     # High-quality video encoding for final results
     encoding:
       format: "h264"
@@ -138,7 +138,7 @@ output:
         enabled: true
         codec: "copy"
       container: "mp4"
-  
+
   # Full reporting
   reports:
     generate_html_report: true
@@ -150,7 +150,7 @@ logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   save_to_file: true
-  log_file: "./results/model_comparison.log"
+  log_file: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/model_comparison.log"
 
 # Development and debugging
 debug:
@@ -158,4 +158,4 @@ debug:
   save_intermediate_results: false
   profile_memory: true
   profile_compute: true
-  verbose_errors: true 
+  verbose_errors: true

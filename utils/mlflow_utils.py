@@ -1,432 +1,308 @@
 """
-MLflow utilities for experiment tracking
+MLflow Utilities for Multi-Run Management
+Provides tools for viewing and managing MLflow experiments across all runs
 """
 
 import os
-import mlflow
-import mlflow.pytorch
-import mlflow.sklearn
-from typing import Dict, Any, Optional, List
 import json
-import tempfile
-import shutil
-from pathlib import Path
+import yaml
+import subprocess
 import logging
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class MLflowManager:
-    """MLflow experiment management utilities"""
+    """Manages MLflow experiments across all runs in the shared directory"""
 
-    def __init__(self, config: Dict[str, Any]):
-        """Initialize MLflow manager
-
-        Args:
-            config: MLflow configuration dictionary
-        """
-        self.config = config
-        self.tracking_uri = config.get("tracking_uri", "./results/mlruns")
-        self.experiment_name = config.get(
-            "experiment_name", "pose_estimation_comparison"
+    def __init__(self):
+        self.shared_results_dir = Path(
+            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results"
         )
-        self.artifact_location = config.get("artifact_location", None)
+        self.runs_dir = self.shared_results_dir / "runs"
 
-        self._setup_mlflow()
-
-    def _setup_mlflow(self):
-        """Setup MLflow tracking"""
-        # Set tracking URI
-        mlflow.set_tracking_uri(self.tracking_uri)
-
-        # Create experiment if it doesn't exist
-        try:
-            experiment = mlflow.get_experiment_by_name(self.experiment_name)
-            if experiment is None:
-                experiment_id = mlflow.create_experiment(
-                    self.experiment_name, artifact_location=self.artifact_location
-                )
-                logging.info(
-                    f"Created new MLflow experiment: {self.experiment_name} (ID: {experiment_id})"
-                )
-            else:
-                logging.info(
-                    f"Using existing MLflow experiment: {self.experiment_name}"
-                )
-
-            mlflow.set_experiment(self.experiment_name)
-
-        except Exception as e:
-            logging.error(f"Failed to setup MLflow experiment: {e}")
-            raise
-
-    def start_run(
-        self, run_name: Optional[str] = None, tags: Optional[Dict[str, str]] = None
-    ):
-        """Start a new MLflow run
-
-        Args:
-            run_name: Name for the run
-            tags: Additional tags for the run
-
-        Returns:
-            MLflow run context manager
-        """
-        run_tags = {}
-        if tags:
-            run_tags.update(tags)
-
-        return mlflow.start_run(run_name=run_name, tags=run_tags)
-
-    def log_model_params(self, model, model_name: str):
-        """Log model parameters and configuration
-
-        Args:
-            model: Model instance
-            model_name: Name of the model
-        """
-        try:
-            # Get model info
-            model_info = model.get_model_info()
-
-            # Log basic parameters
-            mlflow.log_param("model_name", model_name)
-            mlflow.log_param("model_type", model_info.get("type", "unknown"))
-            mlflow.log_param("num_keypoints", model_info.get("num_keypoints", 0))
-            mlflow.log_param("device", model.device)
-
-            # Log model-specific configuration
-            for key, value in model.model_config.items():
-                mlflow.log_param(f"config_{key}", value)
-
-            # Log model info as JSON
-            mlflow.log_text(json.dumps(model_info, indent=2), "model_info.json")
-
-        except Exception as e:
-            logging.warning(f"Failed to log model parameters: {e}")
-
-    def log_dataset_info(self, dataset_info: Dict[str, Any]):
-        """Log dataset information
-
-        Args:
-            dataset_info: Dataset metadata
-        """
-        try:
-            # Log dataset parameters
-            mlflow.log_param("num_clips", dataset_info.get("num_clips", 0))
-            mlflow.log_param("num_frames", dataset_info.get("num_frames", 0))
-            mlflow.log_param(
-                "video_format", dataset_info.get("video_format", "unknown")
-            )
-            mlflow.log_param("dataset_split", dataset_info.get("split", "unknown"))
-
-            # Log zoom distribution if available
-            if "zoom_distribution" in dataset_info:
-                zoom_dist = dataset_info["zoom_distribution"]
-                for zoom_type, count in zoom_dist.items():
-                    mlflow.log_param(f"zoom_{zoom_type}_count", count)
-
-            # Log dataset info as artifact
-            mlflow.log_text(json.dumps(dataset_info, indent=2), "dataset_info.json")
-
-        except Exception as e:
-            logging.warning(f"Failed to log dataset info: {e}")
-
-    def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None):
-        """Log evaluation metrics
-
-        Args:
-            metrics: Dictionary of metrics
-            step: Step number for time series metrics
-        """
-        try:
-            for metric_name, value in metrics.items():
-                if isinstance(value, (int, float)) and not (isinstance(value, bool)):
-                    mlflow.log_metric(metric_name, value, step=step)
-
-        except Exception as e:
-            logging.warning(f"Failed to log metrics: {e}")
-
-    def log_performance_metrics(self, performance_metrics: Dict[str, Any]):
-        """Log performance benchmarking results
-
-        Args:
-            performance_metrics: Performance measurement results
-        """
-        try:
-            # Log timing metrics
-            timing_keys = [
-                "mean_inference_time_ms",
-                "std_inference_time_ms",
-                "min_inference_time_ms",
-                "max_inference_time_ms",
-                "median_inference_time_ms",
-                "fps",
-            ]
-
-            for key in timing_keys:
-                if key in performance_metrics:
-                    mlflow.log_metric(key, performance_metrics[key])
-
-            # Log memory metrics
-            memory_keys = [
-                k for k in performance_metrics.keys() if "memory" in k.lower()
-            ]
-            for key in memory_keys:
-                if isinstance(performance_metrics[key], (int, float)):
-                    mlflow.log_metric(key, performance_metrics[key])
-
-            # Log throughput metrics
-            throughput_keys = [
-                "samples_per_second",
-                "total_samples_processed",
-                "total_time_seconds",
-            ]
-
-            for key in throughput_keys:
-                if key in performance_metrics:
-                    mlflow.log_metric(key, performance_metrics[key])
-
-            # Log device info as parameters
-            if "device_info" in performance_metrics:
-                device_info = performance_metrics["device_info"]
-                for key, value in device_info.items():
-                    if isinstance(value, (str, int, float)):
-                        mlflow.log_param(f"device_{key}", value)
-
-        except Exception as e:
-            logging.warning(f"Failed to log performance metrics: {e}")
-
-    def log_pose_visualization(self, image_path: str, artifact_name: str = None):
-        """Log pose visualization images
-
-        Args:
-            image_path: Path to visualization image
-            artifact_name: Name for the artifact (defaults to filename)
-        """
-        try:
-            if os.path.exists(image_path):
-                if artifact_name is None:
-                    artifact_name = os.path.basename(image_path)
-
-                mlflow.log_artifact(image_path, "visualizations")
-
-        except Exception as e:
-            logging.warning(f"Failed to log visualization: {e}")
-
-    def log_video_sample(self, video_path: str, artifact_name: str = None):
-        """Log video sample with pose annotations
-
-        Args:
-            video_path: Path to annotated video
-            artifact_name: Name for the artifact
-        """
-        try:
-            if os.path.exists(video_path):
-                if artifact_name is None:
-                    artifact_name = os.path.basename(video_path)
-
-                mlflow.log_artifact(video_path, "video_samples")
-
-        except Exception as e:
-            logging.warning(f"Failed to log video sample: {e}")
-
-    def save_model_artifacts(self, model, model_name: str):
-        """Save model artifacts and weights
-
-        Args:
-            model: Model instance
-            model_name: Model name for saving
-        """
-        try:
-            # Create temporary directory for model artifacts
-            with tempfile.TemporaryDirectory() as temp_dir:
-                model_dir = os.path.join(temp_dir, model_name)
-                os.makedirs(model_dir, exist_ok=True)
-
-                # Save model configuration
-                config_path = os.path.join(model_dir, "config.json")
-                with open(config_path, "w") as f:
-                    json.dump(model.model_config, f, indent=2)
-
-                # Save model info
-                info_path = os.path.join(model_dir, "model_info.json")
-                with open(info_path, "w") as f:
-                    json.dump(model.get_model_info(), f, indent=2)
-
-                # Log as artifacts
-                mlflow.log_artifacts(model_dir, f"models/{model_name}")
-
-        except Exception as e:
-            logging.warning(f"Failed to save model artifacts: {e}")
-
-    def log_comparison_results(self, comparison_results: Dict[str, Any]):
-        """Log model comparison results
-
-        Args:
-            comparison_results: Results from model comparison
-        """
-        try:
-            # Log summary metrics
-            if "summary" in comparison_results:
-                summary = comparison_results["summary"]
-
-                # Log best performing models
-                if summary.get("fastest_model"):
-                    mlflow.log_param("fastest_model", summary["fastest_model"])
-                if summary.get("most_memory_efficient"):
-                    mlflow.log_param(
-                        "most_memory_efficient", summary["most_memory_efficient"]
-                    )
-                if summary.get("highest_throughput"):
-                    mlflow.log_param(
-                        "highest_throughput", summary["highest_throughput"]
-                    )
-
-            # Create comparison table
-            comparison_table = self._create_comparison_table(comparison_results)
-            mlflow.log_text(comparison_table, "model_comparison.md")
-
-            # Log full results as JSON
-            results_json = json.dumps(comparison_results, indent=2, default=str)
-            mlflow.log_text(results_json, "full_comparison_results.json")
-
-        except Exception as e:
-            logging.warning(f"Failed to log comparison results: {e}")
-
-    def _create_comparison_table(self, results: Dict[str, Any]) -> str:
-        """Create markdown table for model comparison
-
-        Args:
-            results: Comparison results
-
-        Returns:
-            Markdown formatted comparison table
-        """
-        table_lines = [
-            "# Model Comparison Results",
-            "",
-            "| Model | Inference Time (ms) | FPS | Memory (MB) | PCK@0.2 |",
-            "|-------|---------------------|-----|-------------|---------|",
-        ]
-
-        for model_name, model_results in results.items():
-            if model_name == "summary" or "error" in model_results:
-                continue
-
-            inference_time = model_results.get("mean_inference_time_ms", "N/A")
-            fps = model_results.get("fps", "N/A")
-            memory = model_results.get("process_ram_peak_mb", "N/A")
-            pck = model_results.get("pose_pck_0.2_mean", "N/A")
-
-            # Format numbers
-            if isinstance(inference_time, (int, float)):
-                inference_time = f"{inference_time:.2f}"
-            if isinstance(fps, (int, float)):
-                fps = f"{fps:.1f}"
-            if isinstance(memory, (int, float)):
-                memory = f"{memory:.1f}"
-            if isinstance(pck, (int, float)):
-                pck = f"{pck:.3f}"
-
-            table_lines.append(
-                f"| {model_name} | {inference_time} | {fps} | {memory} | {pck} |"
-            )
-
-        return "\n".join(table_lines)
-
-    def get_experiment_runs(self) -> List[Dict[str, Any]]:
-        """Get all runs from current experiment
-
-        Returns:
-            List of run information dictionaries
-        """
-        try:
-            experiment = mlflow.get_experiment_by_name(self.experiment_name)
-            if experiment is None:
-                return []
-
-            runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id])
-            return runs.to_dict("records")
-
-        except Exception as e:
-            logging.warning(f"Failed to get experiment runs: {e}")
+    def list_all_experiments(self) -> List[Dict[str, Any]]:
+        """List all MLflow experiments across all runs"""
+        if not self.runs_dir.exists():
             return []
 
-    def compare_runs(self, run_ids: List[str]) -> Dict[str, Any]:
-        """Compare multiple MLflow runs
+        experiments = []
+        for run_dir in sorted(self.runs_dir.iterdir(), reverse=True):
+            if run_dir.is_dir():
+                mlflow_dir = run_dir / "mlruns"
+                if mlflow_dir.exists():
+                    # Find experiment directories (numbered folders)
+                    for exp_dir in mlflow_dir.iterdir():
+                        if exp_dir.is_dir() and exp_dir.name.isdigit():
+                            meta_file = exp_dir / "meta.yaml"
+                            if meta_file.exists():
+                                try:
+                                    with open(meta_file, "r") as f:
+                                        meta = yaml.safe_load(f)
 
-        Args:
-            run_ids: List of run IDs to compare
+                                    # Load run metadata if available
+                                    run_metadata_file = run_dir / "run_metadata.json"
+                                    run_metadata = {}
+                                    if run_metadata_file.exists():
+                                        with open(run_metadata_file, "r") as f:
+                                            run_metadata = json.load(f)
 
-        Returns:
-            Comparison results
-        """
+                                    experiments.append(
+                                        {
+                                            "experiment_id": exp_dir.name,
+                                            "experiment_name": meta.get(
+                                                "name", "unknown"
+                                            ),
+                                            "run_name": run_dir.name,
+                                            "run_timestamp": run_metadata.get(
+                                                "timestamp", "unknown"
+                                            ),
+                                            "created_at": run_metadata.get(
+                                                "created_at", "unknown"
+                                            ),
+                                            "machine": run_metadata.get(
+                                                "machine_info", {}
+                                            ).get("hostname", "unknown"),
+                                            "mlflow_dir": str(mlflow_dir),
+                                            "tracking_uri": f"file://{mlflow_dir.absolute()}",
+                                            "artifact_location": meta.get(
+                                                "artifact_location", ""
+                                            ),
+                                            "lifecycle_stage": meta.get(
+                                                "lifecycle_stage", "active"
+                                            ),
+                                        }
+                                    )
+                                except (yaml.YAMLError, json.JSONDecodeError, KeyError):
+                                    pass
+
+        return experiments
+
+    def get_experiment_summary(self) -> Dict[str, Any]:
+        """Get a summary of all experiments"""
+        experiments = self.list_all_experiments()
+
+        summary = {
+            "total_experiments": len(experiments),
+            "total_runs": len(set(exp["run_name"] for exp in experiments)),
+            "machines": list(set(exp["machine"] for exp in experiments)),
+            "experiment_types": {},
+            "recent_experiments": [],
+        }
+
+        # Categorize experiments by type
+        for exp in experiments:
+            exp_name = exp["experiment_name"]
+            if "optuna" in exp_name.lower():
+                exp_type = "optuna"
+            elif "comparison" in exp_name.lower():
+                exp_type = "comparison"
+            else:
+                exp_type = "other"
+
+            if exp_type not in summary["experiment_types"]:
+                summary["experiment_types"][exp_type] = 0
+            summary["experiment_types"][exp_type] += 1
+
+        # Get recent experiments (last 10)
+        summary["recent_experiments"] = experiments[:10]
+
+        return summary
+
+    def start_mlflow_ui(
+        self, port: int = 5000, host: str = "localhost"
+    ) -> subprocess.Popen:
+        """Start MLflow UI for all experiments"""
+        tracking_uri = f"file://{self.shared_results_dir.absolute()}"
+
+        cmd = [
+            "mlflow",
+            "ui",
+            "--backend-store-uri",
+            tracking_uri,
+            "--host",
+            host,
+            "--port",
+            str(port),
+        ]
+
+        logger.info(f"Starting MLflow UI with command: {' '.join(cmd)}")
+        logger.info(f"MLflow UI will be available at: http://{host}:{port}")
+
+        # Start MLflow UI in background
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+
+        return process
+
+    def create_consolidated_tracking_uri(self) -> str:
+        """Create a consolidated tracking URI that includes all experiments"""
+        return f"file://{self.shared_results_dir.absolute()}"
+
+    def export_experiment_data(self, output_file: Optional[str] = None) -> str:
+        """Export all experiment data to a JSON file"""
+        experiments = self.list_all_experiments()
+        summary = self.get_experiment_summary()
+
+        export_data = {
+            "export_timestamp": datetime.now().isoformat(),
+            "summary": summary,
+            "experiments": experiments,
+        }
+
+        if output_file is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_file = f"mlflow_experiments_export_{timestamp}.json"
+
+        output_path = Path(output_file)
+        with open(output_path, "w") as f:
+            json.dump(export_data, f, indent=2)
+
+        logger.info(f"Exported experiment data to: {output_path}")
+        return str(output_path)
+
+    def cleanup_old_experiments(self, keep_last_n_runs: int = 5):
+        """Clean up old experiment runs, keeping only the most recent ones"""
+        if not self.runs_dir.exists():
+            logger.info("No runs directory found, nothing to clean up")
+            return
+
+        # Get all run directories sorted by timestamp
+        run_dirs = []
+        for run_dir in self.runs_dir.iterdir():
+            if run_dir.is_dir():
+                run_dirs.append(run_dir)
+
+        # Sort by directory name (which includes timestamp)
+        run_dirs.sort(key=lambda x: x.name, reverse=True)
+
+        if len(run_dirs) <= keep_last_n_runs:
+            logger.info(f"Only {len(run_dirs)} runs found, no cleanup needed")
+            return
+
+        # Remove old runs
+        runs_to_remove = run_dirs[keep_last_n_runs:]
+        for run_dir in runs_to_remove:
+            logger.info(f"Removing old run: {run_dir.name}")
+            import shutil
+
+            shutil.rmtree(run_dir)
+
+        logger.info(f"Cleanup complete: kept {keep_last_n_runs} most recent runs")
+
+    def print_experiments_summary(self):
+        """Print a formatted summary of all experiments"""
+        summary = self.get_experiment_summary()
+
+        print("\n" + "=" * 60)
+        print("🧪 MLFLOW EXPERIMENTS SUMMARY")
+        print("=" * 60)
+
+        print(f"📊 Total Experiments: {summary['total_experiments']}")
+        print(f"🗂️ Total Runs: {summary['total_runs']}")
+        print(f"💻 Machines: {', '.join(summary['machines'])}")
+
+        print(f"\n📈 Experiment Types:")
+        for exp_type, count in summary["experiment_types"].items():
+            print(f"   • {exp_type.capitalize()}: {count}")
+
+        print(f"\n🕐 Recent Experiments:")
+        for exp in summary["recent_experiments"][:5]:
+            print(f"   • {exp['experiment_name']} ({exp['run_name']})")
+            print(f"     Machine: {exp['machine']}, Created: {exp['created_at']}")
+
+        print(f"\n🔍 Access All Experiments:")
+        tracking_uri = self.create_consolidated_tracking_uri()
+        print(f"   MLflow UI: mlflow ui --backend-store-uri {tracking_uri}")
+        print(f"   Tracking URI: {tracking_uri}")
+
+    def get_run_comparison(self) -> Dict[str, Any]:
+        """Compare results across different runs"""
+        experiments = self.list_all_experiments()
+
+        # Group experiments by run
+        runs_data = {}
+        for exp in experiments:
+            run_name = exp["run_name"]
+            if run_name not in runs_data:
+                runs_data[run_name] = {
+                    "run_name": run_name,
+                    "timestamp": exp["run_timestamp"],
+                    "machine": exp["machine"],
+                    "experiments": [],
+                }
+            runs_data[run_name]["experiments"].append(exp)
+
+        # Sort runs by timestamp
+        sorted_runs = sorted(
+            runs_data.values(), key=lambda x: x["timestamp"], reverse=True
+        )
+
+        return {"total_runs": len(sorted_runs), "runs": sorted_runs}
+
+
+def main():
+    """CLI interface for MLflow management"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="MLflow Multi-Run Management")
+    parser.add_argument("--list", action="store_true", help="List all experiments")
+    parser.add_argument(
+        "--summary", action="store_true", help="Show experiments summary"
+    )
+    parser.add_argument(
+        "--export", type=str, help="Export experiment data to JSON file"
+    )
+    parser.add_argument(
+        "--ui", action="store_true", help="Start MLflow UI for all experiments"
+    )
+    parser.add_argument("--port", type=int, default=5000, help="Port for MLflow UI")
+    parser.add_argument("--cleanup", type=int, help="Clean up old runs (keep last N)")
+    parser.add_argument(
+        "--compare", action="store_true", help="Compare results across runs"
+    )
+
+    args = parser.parse_args()
+
+    # Setup logging
+    logging.basicConfig(level=logging.INFO)
+
+    mlflow_manager = MLflowManager()
+
+    if args.list:
+        experiments = mlflow_manager.list_all_experiments()
+        print(json.dumps(experiments, indent=2))
+
+    elif args.summary:
+        mlflow_manager.print_experiments_summary()
+
+    elif args.export:
+        mlflow_manager.export_experiment_data(args.export)
+
+    elif args.ui:
+        process = mlflow_manager.start_mlflow_ui(port=args.port)
         try:
-            runs_data = []
+            print(f"MLflow UI running at http://localhost:{args.port}")
+            print("Press Ctrl+C to stop...")
+            process.wait()
+        except KeyboardInterrupt:
+            print("\nStopping MLflow UI...")
+            process.terminate()
 
-            for run_id in run_ids:
-                run = mlflow.get_run(run_id)
-                runs_data.append(
-                    {
-                        "run_id": run_id,
-                        "run_name": run.info.run_name,
-                        "params": run.data.params,
-                        "metrics": run.data.metrics,
-                        "tags": run.data.tags,
-                    }
-                )
+    elif args.cleanup:
+        mlflow_manager.cleanup_old_experiments(args.cleanup)
 
-            return {
-                "runs": runs_data,
-                "comparison_timestamp": mlflow.utils.time.get_current_time_millis(),
-            }
+    elif args.compare:
+        comparison = mlflow_manager.get_run_comparison()
+        print(json.dumps(comparison, indent=2))
 
-        except Exception as e:
-            logging.warning(f"Failed to compare runs: {e}")
-            return {}
+    else:
+        mlflow_manager.print_experiments_summary()
 
-    def cleanup_old_runs(self, max_runs: int = 50):
-        """Clean up old experiment runs
 
-        Args:
-            max_runs: Maximum number of runs to keep
-        """
-        try:
-            experiment = mlflow.get_experiment_by_name(self.experiment_name)
-            if experiment is None:
-                return
-
-            runs = mlflow.search_runs(
-                experiment_ids=[experiment.experiment_id], order_by=["start_time DESC"]
-            )
-
-            if len(runs) > max_runs:
-                old_runs = runs.iloc[max_runs:]
-                for _, run in old_runs.iterrows():
-                    mlflow.delete_run(run.run_id)
-                    logging.info(f"Deleted old run: {run.run_id}")
-
-        except Exception as e:
-            logging.warning(f"Failed to cleanup old runs: {e}")
-
-    def export_experiment(self, output_path: str):
-        """Export experiment data to file
-
-        Args:
-            output_path: Path to export file
-        """
-        try:
-            runs = self.get_experiment_runs()
-
-            export_data = {
-                "experiment_name": self.experiment_name,
-                "export_timestamp": mlflow.utils.time.get_current_time_millis(),
-                "runs": runs,
-            }
-
-            with open(output_path, "w") as f:
-                json.dump(export_data, f, indent=2, default=str)
-
-            logging.info(f"Exported experiment data to {output_path}")
-
-        except Exception as e:
-            logging.warning(f"Failed to export experiment: {e}")
+if __name__ == "__main__":
+    main()
