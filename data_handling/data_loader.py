@@ -337,7 +337,20 @@ class SurfingDataLoader:
                 annotated_files = []
                 for video_file in video_files:
                     relative_path = str(video_file.relative_to(self.base_path))
-                    if relative_path in self.annotations_data:
+                    
+                    # For FFV1 format, we need to look up annotations using the corresponding H.264 path
+                    # since annotation files reference H.264 files
+                    if video_format == "ffv1":
+                        # Convert FFV1 path to corresponding H.264 path for annotation lookup
+                        # e.g., "03_CLIPPED/ffv1/SONY_300/SESSION_060325/C0019_clip_1.mkv"
+                        # becomes "03_CLIPPED/h264/SONY_300/SESSION_060325/C0019_clip_1.mp4"
+                        h264_path = relative_path.replace("03_CLIPPED/ffv1/", "03_CLIPPED/h264/")
+                        h264_path = h264_path.replace(".mkv", ".mp4")
+                        annotation_lookup_path = h264_path
+                    else:
+                        annotation_lookup_path = relative_path
+                    
+                    if annotation_lookup_path in self.annotations_data:
                         annotated_files.append(video_file)
 
                 # Use annotated file if available, otherwise skip
@@ -460,9 +473,21 @@ class SurfingDataLoader:
 
             # Get relative path for annotation lookup
             relative_path = str(video_path.relative_to(self.base_path))
+            
+            # For FFV1 format, we need to look up annotations using the corresponding H.264 path
+            # since annotation files reference H.264 files
+            if format == "ffv1":
+                # Convert FFV1 path to corresponding H.264 path for annotation lookup
+                # e.g., "03_CLIPPED/ffv1/SONY_300/SESSION_060325/C0019_clip_1.mkv"
+                # becomes "03_CLIPPED/h264/SONY_300/SESSION_060325/C0019_clip_1.mp4"
+                h264_path = relative_path.replace("03_CLIPPED/ffv1/", "03_CLIPPED/h264/")
+                h264_path = h264_path.replace(".mkv", ".mp4")
+                annotation_lookup_path = h264_path
+            else:
+                annotation_lookup_path = relative_path
 
-            # Get annotations for this video
-            annotations = self.annotations_data.get(relative_path, [])
+            # Get annotations for this video using the appropriate lookup path
+            annotations = self.annotations_data.get(annotation_lookup_path, [])
 
             clip = VideoClip(
                 file_path=str(video_path),

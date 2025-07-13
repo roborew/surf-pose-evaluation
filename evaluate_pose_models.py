@@ -365,9 +365,12 @@ USAGE RECOMMENDATIONS:
 
             # Processing summary
             print(f"\n📊 Processing Summary for {model_name}:")
-            print(
-                f"   • Successful maneuvers: {successful_maneuvers}/{len(maneuvers)} ({100*successful_maneuvers/len(maneuvers):.1f}%)"
-            )
+            if len(maneuvers) > 0:
+                print(
+                    f"   • Successful maneuvers: {successful_maneuvers}/{len(maneuvers)} ({100*successful_maneuvers/len(maneuvers):.1f}%)"
+                )
+            else:
+                print(f"   • No maneuvers found to process")
             if failed_maneuvers > 0:
                 print(f"   • Failed maneuvers: {failed_maneuvers}")
             if all_performance_metrics:
