@@ -159,7 +159,6 @@ $RECYCLE.BIN/
 data/
 results/
 *.log
-
 # Conda environments
 condaenv.*
 environment_*.yml.bak

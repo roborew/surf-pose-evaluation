@@ -1,0 +1,161 @@
+# Production Model Comparison Configuration
+# Phase 2: Compare models using optimal hyperparameters from Optuna
+
+# Experiment metadata
+experiment:
+  name: "surf_pose_production_comparison"
+  description: "Final model comparison using optimal hyperparameters on full dataset"
+  version: "1.0"
+  author: "Production Team"
+
+# Dataset configuration - FULL DATASET FOR COMPARISON
+dataset:
+  base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
+  video_clips:
+    h264_path: "03_CLIPPED/h264"
+    ffv1_path: "03_CLIPPED/ffv1"
+    input_format: "ffv1" # High quality for final comparison
+  annotations:
+    labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
+    sony_300_labels: "sony_300"
+    sony_70_labels: "sony_70"
+  splits:
+    train_ratio: 0.70
+    val_ratio: 0.15
+    test_ratio: 0.15
+    random_seed: 42  # SAME SEED ensures same data splits
+
+# Model configuration - USES BEST PARAMS FROM OPTUNA
+models:
+  enabled_models:
+    - "mediapipe"
+    - "blazepose"
+    - "yolov8_pose"
+    - "pytorch_pose"
+  default_settings:
+    confidence_threshold: 0.3
+    batch_size: 1
+    device: "cuda"
+    half_precision: false
+  
+  # Load optimal parameters from Optuna phase
+  load_best_params:
+    enabled: true
+    source_path: "./results/best_params"
+    fallback_to_defaults: true
+
+# Evaluation configuration - FULL DATASET
+evaluation:
+  quick_test:
+    num_clips: 50
+    max_duration_seconds: 10
+    cameras: ["SONY_300", "SONY_70"]
+  comprehensive_test:
+    num_clips: 200  # Full dataset for comparison
+    max_duration_seconds: 30
+    cameras: ["SONY_300", "SONY_70"]
+  metrics:
+    pose_accuracy:
+      - "pck_0.1"
+      - "pck_0.2"
+      - "pck_0.3"
+      - "mpjpe"
+    performance:
+      - "inference_latency_ms"
+      - "memory_usage_gb"
+      - "throughput_fps"
+      - "model_size_mb"
+
+# MLflow configuration - SEPARATE EXPERIMENT
+mlflow:
+  enabled: true
+  experiment_name: "surf_pose_production_comparison"  # Different experiment name
+  tracking_uri: "./results/mlruns"
+  logging:
+    parameters: true
+    metrics: true
+    artifacts: true
+    models: false
+    log_predictions: true  # Full predictions for comparison
+    log_visualizations: true  # Full visualizations for comparison
+    max_videos_per_run: 5
+  default_tags:
+    project: "surf_pose_evaluation"
+    stage: "model_comparison"
+    dataset: "widemouth_march_2025"
+    uses_optimal_params: "true"
+
+# Optuna configuration - DISABLED FOR COMPARISON
+optuna:
+  enabled: false  # No optimization in comparison phase
+
+# Hardware configuration
+hardware:
+  gpu:
+    device_id: 0
+    memory_fraction: 0.9
+    allow_growth: true
+  cpu:
+    num_workers: 8
+    num_threads: 16
+  memory:
+    max_memory_gb: 32
+    cache_enabled: true
+    clear_cache_frequency: 50
+
+# Output configuration - FULL PRODUCTION OUTPUT
+output:
+  results_dir: "./results"
+  
+  # Full prediction storage
+  predictions:
+    enabled: true
+    base_path: "predictions"
+    shared_storage_path: "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/predictions"
+    format: "json"
+    include_metadata: true
+    compress: false
+  
+  # Full visualization suite
+  visualization:
+    enabled: true
+    save_overlay_videos: true
+    save_keypoint_plots: true
+    save_comparison_plots: true
+    max_examples_per_model: 10
+    
+    # Shared storage for production
+    shared_storage_path: "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE"
+    
+    # High-quality video encoding for final results
+    encoding:
+      format: "h264"
+      quality:
+        crf: 23
+        preset: "fast"
+      pixel_format: "yuv420p"
+      audio:
+        enabled: true
+        codec: "copy"
+      container: "mp4"
+  
+  # Full reporting
+  reports:
+    generate_html_report: true
+    generate_pdf_summary: true
+    include_failure_analysis: true
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  save_to_file: true
+  log_file: "./results/model_comparison.log"
+
+# Development and debugging
+debug:
+  enabled: false
+  save_intermediate_results: false
+  profile_memory: true
+  profile_compute: true
+  verbose_errors: true 

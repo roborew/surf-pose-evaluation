@@ -240,6 +240,42 @@ class PoseEvaluator:
 
         return results
 
+    def _load_best_params_from_optuna(self, model_name: str) -> Dict:
+        """Load best parameters from Optuna optimization results"""
+        # Check if we should load best params from config
+        load_config = self.config.get("models", {}).get("load_best_params", {})
+        if not load_config.get("enabled", False):
+            return {}
+        
+        source_path = load_config.get("source_path", "./results/best_params")
+        best_params_file = Path(source_path) / "best_parameters.yaml"
+        
+        if not best_params_file.exists():
+            if load_config.get("fallback_to_defaults", True):
+                logging.warning(f"Best parameters file not found: {best_params_file}, using defaults")
+                return {}
+            else:
+                raise FileNotFoundError(f"Best parameters file not found: {best_params_file}")
+        
+        try:
+            with open(best_params_file, 'r') as f:
+                all_best_params = yaml.safe_load(f)
+            
+            model_params = all_best_params.get(model_name, {})
+            if model_params:
+                logging.info(f"Loaded best parameters for {model_name}: {model_params}")
+            else:
+                logging.warning(f"No best parameters found for {model_name} in {best_params_file}")
+            
+            return model_params
+            
+        except Exception as e:
+            if load_config.get("fallback_to_defaults", True):
+                logging.warning(f"Failed to load best parameters: {e}, using defaults")
+                return {}
+            else:
+                raise
+
     def _evaluate_single_model(self, model_name: str, maneuvers: List) -> Dict:
         """Evaluate a single pose estimation model"""
 
@@ -251,14 +287,32 @@ class PoseEvaluator:
         else:
             model_config = {}
 
+        # Load best parameters from Optuna if available
+        best_params = self._load_best_params_from_optuna(model_name)
+        
+        # Merge configurations: best_params override model_config
+        final_config = {**model_config, **best_params}
+        
+        # Log parameter source
+        if best_params:
+            logging.info(f"Using optimized parameters for {model_name}: {best_params}")
+            param_source = "optuna_optimized"
+        else:
+            logging.info(f"Using default parameters for {model_name}")
+            param_source = "default_config"
+
         # Initialize model
         model_class = self.model_registry[model_name]
-        model = model_class(device=self.device, **model_config)
+        model = model_class(device=self.device, **final_config)
 
         # Start MLflow run
-        with mlflow.start_run(run_name=f"{model_name}_evaluation"):
+        run_name = f"{model_name}_evaluation"
+        if best_params:
+            run_name = f"{model_name}_evaluation_optimized"
+            
+        with mlflow.start_run(run_name=run_name):
             # Log model parameters (safely handle long strings)
-            safe_config = self._sanitize_mlflow_params(model_config)
+            safe_config = self._sanitize_mlflow_params(final_config)
 
             # Add detailed description for standard evaluation
             config_preview = list(safe_config.items())[:10]
@@ -266,25 +320,26 @@ class PoseEvaluator:
             if len(safe_config) > 10:
                 config_text += "\n..."
 
-            standard_eval_description = f"""
-STANDARD MODEL EVALUATION - Baseline Performance
+            # Create detailed description
+            description = f"""
+STANDARD MODEL EVALUATION - {"Optimized Configuration" if best_params else "Default Configuration"}
 
-PURPOSE: Comprehensive evaluation using default/configured hyperparameters
-DATA SCOPE: Full dataset evaluation on {len(maneuvers)} maneuvers
-CONFIGURATION: Default parameters from model config file
+PURPOSE: Comprehensive evaluation of {model_name} pose estimation model
+DATA SCOPE: Full evaluation on {len(maneuvers)} maneuvers (complete dataset)
+PARAMETER SOURCE: {param_source.replace('_', ' ').title()}
 
-This is a standard evaluation run using the model's default or pre-configured
-hyperparameters without optimization. Use this to establish baseline performance
-or when you have known-good parameters that don't require optimization.
+This run evaluates the {model_name} model using {'optimal hyperparameters discovered through Optuna optimization' if best_params else 'default configuration parameters'}. 
+The evaluation covers the complete dataset to provide accurate performance metrics
+for production deployment decisions.
 
 EVALUATION DETAILS:
 - Model: {model_name}
-- Configuration source: Model config file or defaults
+- Parameter source: {param_source}
 - Data coverage: Complete dataset ({len(maneuvers)} maneuvers)
 - Evaluation type: Comprehensive (all metrics computed)
-- Hyperparameter optimization: Not used
+- Expected runtime: 10-30 minutes depending on model and dataset size
 
-CURRENT CONFIGURATION:
+CONFIGURATION USED:
 {config_text}
 
 PERFORMANCE INTERPRETATION:
@@ -294,115 +349,42 @@ PERFORMANCE INTERPRETATION:
 - Memory metrics: Lower is better for deployment efficiency
 
 USAGE RECOMMENDATIONS:
-✅ Use as baseline for comparing optimized configurations
-✅ Use when you have known-good hyperparameters
-✅ Compare across different model architectures
-✅ Good starting point before running optimization
-
-💡 Consider running with --use-optuna to find better hyperparameters
+✅ Use these metrics for production deployment decisions
+✅ Compare against other models for backbone selection
+✅ Cite these results in research papers or reports
+✅ Use this configuration for actual surfing analysis system
             """.strip()
 
-            mlflow.set_tag("mlflow.note.content", standard_eval_description)
-            mlflow.log_params(safe_config)
+            mlflow.set_tag("mlflow.note.content", description)
+
+            # Log model parameters
             mlflow.log_param("model_name", model_name)
-            mlflow.log_param("device", self.device)
-            mlflow.log_param("num_maneuvers", len(maneuvers))
+            mlflow.log_param("parameter_source", param_source)
             mlflow.log_param("optimization_mode", "standard_evaluation")
-            mlflow.log_param(
-                "data_scope", f"complete_dataset_{len(maneuvers)}_maneuvers"
-            )
-            mlflow.log_param("purpose", "baseline_evaluation")
+            mlflow.log_param("data_scope", f"complete_dataset_{len(maneuvers)}_maneuvers")
+            mlflow.log_param("purpose", "model_evaluation")
+            
+            # Log whether optimized parameters were used
+            mlflow.log_param("uses_optimized_params", bool(best_params))
+            
+            # Log configuration parameters
+            for param_name, param_value in safe_config.items():
+                mlflow.log_param(param_name, param_value)
 
-            print(f"\n🔄 Starting evaluation of {model_name}")
-            print(f"   • Device: {self.device}")
-            print(f"   • Maneuvers to process: {len(maneuvers)}")
-            print(
-                f"   • Model complexity: {safe_config.get('model_complexity', 'N/A')}"
-            )
-            print(f"   • MLflow run: {mlflow.active_run().info.run_id[:8]}...")
-            print("   " + "=" * 50)
-
-            # Evaluation metrics
-            all_pose_metrics = []
-            all_performance_metrics = []
-
-            # Process maneuvers with enhanced progress tracking
-            print(f"\n📹 Processing maneuvers...")
-            successful_maneuvers = 0
-            failed_maneuvers = 0
-
-            for i, maneuver in enumerate(
-                tqdm(
-                    maneuvers,
-                    desc=f"🎯 {model_name}",
-                    bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
-                )
-            ):
-                try:
-                    # Process maneuver
-                    print(
-                        f"   Processing maneuver {i+1}/{len(maneuvers)}: {maneuver.maneuver_type} ({maneuver.duration:.1f}s)",
-                        end="",
-                        flush=True,
-                    )
-
-                    maneuver_metrics = self._process_video_maneuver(
-                        model, maneuver, model_name
-                    )
-                    all_pose_metrics.append(maneuver_metrics["pose"])
-                    all_performance_metrics.append(maneuver_metrics["performance"])
-
-                    successful_maneuvers += 1
-                    print(f" ✅ ({maneuver_metrics['performance']['fps']:.1f} FPS)")
-
-                except Exception as e:
-                    failed_maneuvers += 1
-                    print(f" ❌ Error: {str(e)[:50]}...")
-                    logging.error(
-                        f"Error processing maneuver {maneuver.maneuver_id}: {e}"
-                    )
-                    continue
-
-            # Processing summary
-            print(f"\n📊 Processing Summary for {model_name}:")
-            if len(maneuvers) > 0:
-                print(
-                    f"   • Successful maneuvers: {successful_maneuvers}/{len(maneuvers)} ({100*successful_maneuvers/len(maneuvers):.1f}%)"
-                )
-            else:
-                print(f"   • No maneuvers found to process")
-            if failed_maneuvers > 0:
-                print(f"   • Failed maneuvers: {failed_maneuvers}")
-            if all_performance_metrics:
-                avg_fps = np.mean([m["fps"] for m in all_performance_metrics])
-                print(f"   • Average FPS: {avg_fps:.1f}")
-            print("   " + "=" * 50)
-
-            # Aggregate results
-            aggregated_metrics = self._aggregate_metrics(
-                all_pose_metrics, all_performance_metrics
+            # Run evaluation
+            result = self._evaluate_single_model_internal(
+                model, model_name, maneuvers, log_to_mlflow=True
             )
 
-            # Log metrics to MLflow
-            for metric_name, value in aggregated_metrics.items():
-                mlflow.log_metric(metric_name, value)
-
-            # Save model artifacts
-            model_artifacts_path = f"models/{model_name}"
-            os.makedirs(model_artifacts_path, exist_ok=True)
-            mlflow.log_artifacts(model_artifacts_path)
-
-            # Generate sample visualizations if enabled
+            # Generate sample visualizations
             if (
                 self.config.get("output", {})
                 .get("visualization", {})
                 .get("enabled", False)
             ):
-                self._create_sample_visualizations(
-                    model, model_name, maneuvers[:3]
-                )  # Use first 3 maneuvers
+                self._create_sample_visualizations(model, model_name, maneuvers[:3])
 
-            return aggregated_metrics
+            return result
 
     def _sanitize_mlflow_params(self, config: Dict, max_length: int = 500) -> Dict:
         """Sanitize configuration parameters for MLflow logging

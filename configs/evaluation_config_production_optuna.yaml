@@ -1,0 +1,142 @@
+# Production Optuna Hyperparameter Optimization Configuration
+# Phase 1: Find optimal hyperparameters for each model
+
+# Experiment metadata
+experiment:
+  name: "surf_pose_production_optuna"
+  description: "Hyperparameter optimization for pose estimation models"
+  version: "1.0"
+  author: "Production Team"
+
+# Dataset configuration
+dataset:
+  base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
+  video_clips:
+    h264_path: "03_CLIPPED/h264"
+    ffv1_path: "03_CLIPPED/ffv1"
+    input_format: "ffv1" # High quality for optimization
+  annotations:
+    labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
+    sony_300_labels: "sony_300"
+    sony_70_labels: "sony_70"
+  splits:
+    train_ratio: 0.70
+    val_ratio: 0.15
+    test_ratio: 0.15
+    random_seed: 42
+
+# Model configuration
+models:
+  enabled_models:
+    - "mediapipe"
+    - "blazepose"
+    - "yolov8_pose"
+    - "pytorch_pose"
+  default_settings:
+    confidence_threshold: 0.3
+    batch_size: 1
+    device: "cuda"
+    half_precision: false
+
+# Evaluation configuration - SMALLER DATASET FOR OPTIMIZATION
+evaluation:
+  quick_test:
+    num_clips: 20
+    max_duration_seconds: 10
+    cameras: ["SONY_300", "SONY_70"]
+  comprehensive_test:
+    num_clips: 50  # Smaller for optimization speed
+    max_duration_seconds: 20
+    cameras: ["SONY_300", "SONY_70"]
+  metrics:
+    pose_accuracy:
+      - "pck_0.2"  # Primary optimization metric
+    performance:
+      - "inference_latency_ms"
+      - "memory_usage_gb"
+
+# MLflow configuration - SEPARATE EXPERIMENT
+mlflow:
+  enabled: true
+  experiment_name: "surf_pose_production_optuna"  # Different experiment name
+  tracking_uri: "./results/mlruns"
+  logging:
+    parameters: true
+    metrics: true
+    artifacts: true
+    models: false
+    log_predictions: false  # Skip predictions during optimization
+    log_visualizations: false  # Skip visualizations during optimization
+    max_videos_per_run: 0
+  default_tags:
+    project: "surf_pose_evaluation"
+    stage: "hyperparameter_optimization"
+    dataset: "widemouth_march_2025"
+
+# Optuna configuration - FOCUSED ON OPTIMIZATION
+optuna:
+  enabled: true
+  study_name: "surf_pose_optimization_production"
+  direction: "maximize"
+  n_trials: 50
+  timeout_minutes: 180
+  
+  # Optimization target
+  objective:
+    primary_metric: "pck_0.2"
+    secondary_metrics: ["inference_latency_ms", "memory_usage_gb"]
+    weights: [0.7, 0.2, 0.1]
+  
+  # Pruning for early stopping
+  pruning:
+    enabled: true
+    patience: 3
+    min_trials: 5
+
+# Hardware configuration
+hardware:
+  gpu:
+    device_id: 0
+    memory_fraction: 0.9
+    allow_growth: true
+  cpu:
+    num_workers: 8
+    num_threads: 16
+  memory:
+    max_memory_gb: 32
+    cache_enabled: true
+    clear_cache_frequency: 50
+
+# Output configuration - MINIMAL FOR OPTIMIZATION
+output:
+  results_dir: "./results"
+  
+  # Save optimal parameters for next phase
+  best_params:
+    enabled: true
+    save_path: "./results/best_params"
+    format: "yaml"
+  
+  # Minimal visualization during optimization
+  visualization:
+    enabled: false  # Disable to speed up optimization
+    
+  # No reports during optimization
+  reports:
+    generate_html_report: false
+    generate_pdf_summary: false
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  save_to_file: true
+  log_file: "./results/optuna_optimization.log"
+
+# Development and debugging
+debug:
+  enabled: false
+  save_intermediate_results: false
+  profile_memory: false
+  profile_compute: false
+  verbose_errors: true 
