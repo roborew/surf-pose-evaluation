@@ -182,7 +182,7 @@ class MLflowManager:
 
         if len(run_dirs) <= keep_last_n_runs:
             logger.info(f"Only {len(run_dirs)} runs found, no cleanup needed")
-            return
+                return
 
         # Remove old runs
         runs_to_remove = run_dirs[keep_last_n_runs:]

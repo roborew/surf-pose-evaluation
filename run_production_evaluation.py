@@ -98,13 +98,12 @@ def run_optuna_phase(run_manager: RunManager, args) -> str:
     logger.info(f"Running command: {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        # Run with real-time output streaming
+        result = subprocess.run(cmd, check=True, text=True)
         logger.info("✅ Optuna optimization completed successfully")
         return optuna_config
     except subprocess.CalledProcessError as e:
-        logger.error(f"❌ Optuna optimization failed: {e}")
-        logger.error(f"Stdout: {e.stdout}")
-        logger.error(f"Stderr: {e.stderr}")
+        logger.error(f"❌ Optuna optimization failed with exit code: {e.returncode}")
         raise
 
 
@@ -205,13 +204,12 @@ def run_comparison_phase(run_manager: RunManager, args) -> str:
     logger.info(f"Running command: {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        # Run with real-time output streaming
+        result = subprocess.run(cmd, check=True, text=True)
         logger.info("✅ Comprehensive comparison completed successfully")
         return comparison_config
     except subprocess.CalledProcessError as e:
-        logger.error(f"❌ Model comparison failed: {e}")
-        logger.error(f"Stdout: {e.stdout}")
-        logger.error(f"Stderr: {e.stderr}")
+        logger.error(f"❌ Model comparison failed with exit code: {e.returncode}")
         raise
 
 
