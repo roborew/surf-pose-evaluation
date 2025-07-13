@@ -31,6 +31,7 @@ models:
     - "blazepose"
     - "yolov8_pose"
     - "mmpose"
+    - "pytorch_pose"
   default_settings:
     confidence_threshold: 0.3
     batch_size: 1
