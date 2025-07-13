@@ -182,7 +182,13 @@ class RunManager:
 
         # Update max_clips if provided
         if max_clips is not None:
-            config["data"]["max_clips"] = max_clips
+            if "evaluation" not in config:
+                config["evaluation"] = {}
+            # Set max_clips in both quick_test and comprehensive_test
+            if "quick_test" in config["evaluation"]:
+                config["evaluation"]["quick_test"]["num_clips"] = max_clips
+            if "comprehensive_test" in config["evaluation"]:
+                config["evaluation"]["comprehensive_test"]["num_clips"] = max_clips
 
         # Create config file in run directory
         config_filename = f"{phase}_config_{self.timestamp}.yaml"
