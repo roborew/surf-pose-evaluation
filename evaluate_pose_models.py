@@ -82,7 +82,7 @@ class PoseEvaluator:
         self.data_loader = SurfingDataLoader(self.config)
         self.pose_metrics = PoseMetrics()
         self.performance_metrics = PerformanceMetrics(device=self.device)
-        self.mlflow_manager = MLflowManager(self.config["mlflow"])
+        self.mlflow_manager = MLflowManager()
         self.visualizer = VisualizationUtils()
 
         # Initialize video visualizer with encoding configuration
