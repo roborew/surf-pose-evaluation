@@ -34,8 +34,8 @@ dependencies:
   - pytorch=2.1.*
   - torchvision=0.16.*
   - pytorch-cuda=12.1
-  - gcc 
-  - gxx
+  - gcc_linux-64=9.*
+  - gxx_linux-64=9.*
   - scikit-learn
   - scipy
   - seaborn
@@ -52,11 +52,23 @@ conda env create -f environment_mmpose_build.yml
 # Activate and install OpenMMLab packages
 conda activate mmpose_build
 
+# Use conda-installed GCC and set C++17 compilation flags
+export CC=$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-gcc
+export CXX=$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-g++
+export CXXFLAGS="-std=c++17"
+export CPPFLAGS="-std=c++17"
+export FORCE_CUDA=1
+export MMCV_WITH_OPS=1
+
 echo "🔧 Installing OpenMMLab ecosystem..."
 pip install fsspec
 pip install -U openmim
+
+# Install pre-compiled MMCV (avoid compilation issues)
+echo "Installing pre-compiled MMCV..."
+pip install mmcv==2.0.1 -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html
+
 mim install mmengine==0.8.4
-mim install mmcv==2.0.1
 mim install mmdet==3.1.0
 
 # Store the current directory location
@@ -74,7 +86,7 @@ else
   cd mmpose
 fi
 
-# Install from source - this creates the cached compilation
+# Install from source with proper compilation flags - this creates the cached compilation
 pip install -r requirements.txt
 pip install -v -e .
 
