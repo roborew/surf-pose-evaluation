@@ -118,10 +118,17 @@ def extract_best_parameters(run_manager: RunManager, models: list):
         # Connect to MLflow
         mlflow.set_tracking_uri(str(run_manager.mlflow_dir))
 
-        # Get the Optuna experiment
-        experiment = mlflow.get_experiment_by_name("surf_pose_production_optuna")
+        # Get the Optuna experiment with timestamp suffix
+        experiment_name = f"surf_pose_production_optuna_{run_manager.timestamp}"
+        experiment = mlflow.get_experiment_by_name(experiment_name)
         if not experiment:
-            logger.error("❌ Optuna experiment not found")
+            logger.error(f"❌ Optuna experiment not found: {experiment_name}")
+            # Try to list available experiments for debugging
+            try:
+                all_experiments = mlflow.search_experiments()
+                logger.info(f"Available experiments: {[exp.name for exp in all_experiments]}")
+            except Exception as e:
+                logger.error(f"Could not list experiments: {e}")
             return False
 
         best_params = {}
