@@ -1,80 +1,58 @@
 #!/bin/bash
-# MMPose compilation script - creates conda cache for reuse
-# Replicates the proven approach where SurfAnalysis compiled MMPose first
+# Script 1: Build and cache MMPose packages for CUDA 12
+# This creates a temporary environment to compile packages, then caches them for reuse
 
 # Initialize conda for shell script use
 eval "$(conda shell.bash hook)"
 
-echo "🚀 Setting up MMPose compilation (creates conda cache for surf_pose_eval)"
+echo "🚀 Building and caching MMPose packages for CUDA 12"
 
-# Check if MMPose is already compiled and cached
-if python -c "import mmpose; print('MMPose already available')" 2>/dev/null; then
-    echo "✅ MMPose already compiled and available"
-    echo "You can now create the surf_pose_eval environment:"
-    echo "  conda env create -f environment.yml"
+# Check if packages are already cached
+if conda list -n mmpose_cache mmpose 2>/dev/null | grep -q mmpose; then
+    echo "✅ MMPose packages already cached in 'mmpose_cache' environment"
+    echo "Run './create_surf_pose_env.sh' to create your working environment"
     exit 0
 fi
 
-# Create minimal build environment (matching proven SurfAnalysis approach)
-cat > environment_mmpose_build.yml << 'EOF'
-name: mmpose_build
+# Create a temporary build environment (similar to your working approach)
+echo "📦 Creating temporary build environment..."
+cat > temp_build_env.yml << 'EOF'
+name: mmpose_cache
 channels:
   - pytorch
   - nvidia
   - conda-forge
   - defaults
 dependencies:
-  - python=3.8
+  - python=3.10
   - pip
-  - numpy
-  - pandas
-  - matplotlib
-  - jupyter
-  - tqdm
+  - setuptools
+  - wheel
   - pytorch=2.1.*
   - torchvision=0.16.*
+  - torchaudio=2.1.*
   - pytorch-cuda=12.1
-  - gcc_linux-64=9.*
-  - gxx_linux-64=9.*
-  - scikit-learn
+  - numpy
   - scipy
-  - seaborn
   - pip:
-      - opencv-python
-      - pillow
-      - pyyaml
       - fsspec
 EOF
 
-echo "📦 Creating MMPose build environment..."
-conda env create -f environment_mmpose_build.yml
+conda env create -f temp_build_env.yml
+conda activate mmpose_cache
 
-# Activate and install OpenMMLab packages
-conda activate mmpose_build
-
-# Use conda-installed GCC and set C++17 compilation flags
-export CC=$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-gcc
-export CXX=$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-g++
-export CXXFLAGS="-std=c++17"
-export CPPFLAGS="-std=c++17"
-export FORCE_CUDA=1
-export MMCV_WITH_OPS=1
-
-echo "🔧 Installing OpenMMLab ecosystem..."
+# Install OpenMMLab packages using mim (the working approach)
+echo "🔧 Installing OpenMMLab ecosystem with mim..."
 pip install fsspec
 pip install -U openmim
-
-# Install pre-compiled MMCV (avoid compilation issues)
-echo "Installing pre-compiled MMCV..."
-pip install mmcv==2.0.1 -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html
-
-mim install mmengine==0.8.4
-mim install mmdet==3.1.0
+mim install mmengine
+mim install "mmcv>=2.0.0rc4,<2.2.0"
+mim install "mmdet>=3.0.0,<3.3.0"
 
 # Store the current directory location
 ORIGINAL_DIR=$(pwd)
 
-echo "🏗️  Building MMPose from source (creates conda cache)..."
+echo "🏗️  Building MMPose from source..."
 # Check if the mmpose directory exists
 if [ -d "../mmpose" ]; then
   cd ../mmpose
@@ -86,24 +64,16 @@ else
   cd mmpose
 fi
 
-# Install from source with proper compilation flags - this creates the cached compilation
+# Install MMPose in the cache environment
 pip install -r requirements.txt
 pip install -v -e .
 
-# Navigate back to the original directory
 cd "$ORIGINAL_DIR"
+rm temp_build_env.yml
 
-# Clean up build environment
-conda env remove -n mmpose_build -y
-rm environment_mmpose_build.yml
-
-echo "✅ MMPose compilation complete and cached!"
+echo "✅ MMPose packages built and cached!"
 echo ""
-echo "🎯 Next steps:"
-echo "1. Create surf_pose_eval environment: conda env create -f environment.yml"
-echo "2. The environment.yml will use the cached MMPose packages"
-echo "3. Run evaluations: python evaluate_pose_models.py ..."
-
+echo "📦 Cached environment 'mmpose_cache' contains:"
+conda list -n mmpose_cache | grep -E "(mmcv|mmpose|mmdet|mmengine)"
 echo ""
-echo "Testing MMPose availability in base environment:"
-python -c "import mmpose; print('✅ MMPose successfully compiled and cached')" || echo "❌ MMPose compilation failed" 
+echo "🎯 Next step: Run './create_surf_pose_env.sh' to create your working environment" 
