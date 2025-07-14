@@ -1,6 +1,7 @@
 name: surf_pose_eval
 channels:
   - pytorch
+  - nvidia
   - conda-forge
   - defaults
 
@@ -11,54 +12,49 @@ dependencies:
   - setuptools
   - wheel
 
-  # CUDA and PyTorch ecosystem
-  - pytorch
-  - torchvision
-  - torchaudio
+  # CUDA and PyTorch ecosystem (matches system CUDA 12.6)
+  - pytorch=2.1.*
+  - torchvision=0.16.*
+  - torchaudio=2.1.*
+  - pytorch-cuda=12.1
 
-  # Core ML and scientific computing - Match working SurfAnalysis approach
-  - numpy>=1.24.3
-  - scipy
-  - scikit-learn
-  - pandas
-  - matplotlib
+  # Core ML and scientific computing
+  - numpy>=1.24,<1.25
+  - scipy>=1.11,<1.12
+  - scikit-learn>=1.3,<1.4
+  - pandas>=2.0,<2.1
+  - matplotlib>=3.7,<3.8
+  - pillow>=9.0,<10.0
 
-  - pillow
-
-  # Media processing
-  - imageio
+  # Media processing (imageio only - ffmpeg installed by system)
+  - imageio>=2.31
+  - imageio-ffmpeg>=0.4
 
   # Development and testing
-  - pytest
+  - pytest>=7.0
 
   # ML experiment tracking and optimization
-  - mlflow
-  - optuna
+  - mlflow>=2.5
+  - optuna>=3.2
+
+  # Pose estimation dependencies
+  - cython>=0.29
+  - pyyaml>=6.0
+  - tqdm>=4.65
 
   # Additional utilities
-  - pyyaml
-  - tqdm
-  - rich
+  - rich>=13.0
 
   # Pip dependencies for pose estimation packages
   - pip:
-      # OpenCV
-      - opencv-python>=4.7.0
-
-      # MediaPipe for pose estimation
-      - mediapipe>=0.10.0
-
-      # YOLOv8 from Ultralytics
-      - ultralytics>=8.0.0
-
-      # OpenMMLab integration
-      - openmim>=0.3.7
-
-      # Additional utilities
-      - termcolor
-      - psutil
-
-    # Note: MMPose installed via setup script after environment creation
+      - opencv-python==4.8.0.76
+      - mmengine==0.8.4
+      - mmcv==2.0.1
+      - mmpose==1.1.0
+      - mmdet==3.1.0
+      - mediapipe==0.10.14
+      - ultralytics==8.0.165
+      - xtcocotools==1.12
 
 # Environment variables for CUDA optimization
 variables:

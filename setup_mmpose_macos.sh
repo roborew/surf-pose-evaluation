@@ -1,56 +1,70 @@
 #!/bin/bash
-# MMPose setup for macOS (Apple Silicon/Intel)
-# Based on proven SurfAnalysis approach: build first, then make available in main environment
+# MMPose setup for macOS (Apple Silicon/Intel) - CPU/MPS only
+# Adds MMPose to your existing environment_macos.yml setup
 
 # Initialize conda for shell script use
 eval "$(conda shell.bash hook)"
 
-echo "Setting up MMPose for macOS - Phase 1: Build MMPose"
+echo "🚀 Setting up MMPose for macOS (adding to existing environment)"
 
-# Create dedicated MMPose environment for building
-cat > environment_mmpose_build.yml << 'EOF'
-name: mmpose_build
+# Check if MMPose is already compiled and cached
+if python -c "import mmpose; print('MMPose already available')" 2>/dev/null; then
+    echo "✅ MMPose already compiled and available"
+    echo "You can now create/update the surf_pose_eval environment:"
+    echo "  conda env create -f environment_macos.yml"
+    exit 0
+fi
+
+# Create minimal build environment matching your macOS setup
+cat > environment_mmpose_build_macos.yml << 'EOF'
+name: mmpose_build_macos
 channels:
   - pytorch
   - conda-forge
   - defaults
 dependencies:
-  - python=3.8
-  - pip
-  - numpy
-  - pandas
-  - matplotlib
-  - jupyter
-  - tqdm
-  - scipy
-  - seaborn
-  # PyTorch for macOS (CPU + MPS)
+  # Match your environment_macos.yml setup
+  - python=3.9
+  - numpy=1.24.3
+  - pandas=2.0.3
+  - matplotlib=3.7.2
+  - jupyter=1.0.0
+  - tqdm=4.65.0
+  - pyyaml=6.0
+  
+  # PyTorch for macOS (CPU + Metal Performance Shaders)
   - pytorch::pytorch=2.0.1
   - pytorch::torchvision=0.15.2
+  - pytorch::torchaudio=2.0.2
+  
+  - scikit-learn=1.3.0
+  - scipy=1.11.1
+  - seaborn=0.12.2
+  
+  - pip=23.2.1
   - pip:
-      - opencv-python
-      - pillow
-      - pyyaml
-      - fsspec
+      - opencv-python==4.8.0.76
+      - pillow==10.0.0
+      - rich==13.4.2
+      - psutil==5.9.5
 EOF
 
-echo "Creating MMPose build environment..."
-conda env create -f environment_mmpose_build.yml
+echo "📦 Creating MMPose build environment for macOS..."
+conda env create -f environment_mmpose_build_macos.yml
 
-# Activate and install OpenMMLab packages
-conda activate mmpose_build
+# Activate and install OpenMMLab packages (CPU/MPS only)
+conda activate mmpose_build_macos
 
-echo "Installing OpenMMLab ecosystem..."
-pip install fsspec
+echo "🔧 Installing OpenMMLab ecosystem for macOS..."
 pip install -U openmim
-mim install mmengine
-mim install "mmcv>=2.0.0rc4,<2.2.0"
-mim install "mmdet>=3.0.0,<3.3.0" 
+mim install mmengine==0.8.4
+mim install mmcv==2.0.1
+mim install mmdet==3.1.0
 
 # Store the current directory location
 ORIGINAL_DIR=$(pwd)
 
-echo "Cloning and building MMPose from source..."
+echo "🏗️  Building MMPose from source for macOS (creates conda cache)..."
 # Check if the mmpose directory exists
 if [ -d "../mmpose" ]; then
   cd ../mmpose
@@ -62,40 +76,33 @@ else
   cd mmpose
 fi
 
-# Install from source (this creates the cached compilation)
+# Install from source - this creates the cached compilation
 pip install -r requirements.txt
 pip install -v -e .
 
 # Navigate back to the original directory
 cd "$ORIGINAL_DIR"
 
-echo "✅ Phase 1 complete: MMPose built and cached"
+# Clean up build environment
+conda env remove -n mmpose_build_macos -y
+rm environment_mmpose_build_macos.yml
 
-# Phase 2: Update main environment to include MMPose (now that it's compiled)
-echo "Phase 2: Adding MMPose to main surf_pose_eval environment..."
-
-conda activate surf_pose_eval
-
-echo "Installing MMPose in main environment (using cached compilation)..."
-pip install -U openmim
-mim install mmengine
-mim install "mmcv>=2.0.0rc4,<2.2.0"
-mim install "mmdet>=3.0.0,<3.3.0"
-
-# Install MMPose from the compiled source
-cd ../mmpose
-pip install -v -e .
-cd "$ORIGINAL_DIR"
-
-# Clean up temporary environment file
-rm environment_mmpose_build.yml
-
-echo "✅ MMPose setup complete for macOS!"
+echo "✅ MMPose compilation complete and cached for macOS!"
 echo ""
-echo "Testing installation in main environment:"
-conda activate surf_pose_eval
-python -c "import torch; import mediapipe; import ultralytics; from mmpose.apis import MMPoseInferencer; print('All models available in main environment!')"
+echo "🎯 Next steps:"
+echo "1. Update your environment_macos.yml to include MMPose packages in pip section"
+echo "2. Create/update environment: conda env create -f environment_macos.yml"
+echo "3. MMPose will use the cached compilation from this build"
 
 echo ""
-echo "Ready to run evaluations:"
-echo "  python evaluate_pose_models.py configs/evaluation_config_macos.yaml --models mmpose" 
+echo "Add these lines to your environment_macos.yml pip section:"
+echo "      # OpenMMLab MMPose (compiled and cached)"
+echo "      - openmim>=0.3.7"
+echo "      - mmengine==0.8.4"
+echo "      - mmcv==2.0.1"
+echo "      - mmdet==3.1.0"
+echo "      - mmpose==1.1.0"
+
+echo ""
+echo "Testing MMPose availability:"
+python -c "import mmpose; print('✅ MMPose successfully compiled and cached for macOS')" || echo "❌ MMPose compilation failed" 
