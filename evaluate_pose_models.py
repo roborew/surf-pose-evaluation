@@ -779,7 +779,17 @@ INTERPRETATION:
 
                 # Initialize model with sampled parameters
                 model_class = self.model_registry[model_name]
-                model = model_class(device=self.device, **config)
+                try:
+                    model = model_class(device=self.device, **config)
+                except Exception as e:
+                    logging.warning(f"Failed to initialize {model_name} with config {config}: {e}")
+                    print(f"   • Trial failed - model initialization error: {e}")
+                    # Return 0 score for failed initialization
+                    mlflow.log_metric("optuna_trial_score", 0.0)
+                    mlflow.log_metric("num_maneuvers_processed", 0)
+                    mlflow.set_tag("trial_status", "initialization_failed")
+                    mlflow.set_tag("error_type", "model_initialization")
+                    return 0.0
 
                 # Quick evaluation on subset for optimization
                 subset_maneuvers = maneuvers[: min(20, len(maneuvers))]

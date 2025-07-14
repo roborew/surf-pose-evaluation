@@ -88,9 +88,9 @@ class YOLOv8Wrapper(BasePoseModel):
                     self.model.to(self.device)
 
                     # Set precision based on device capabilities
+                    # Note: YOLOv8 handles half precision internally, no need to call .half() explicitly
                     if self.half_precision and self.device == "cuda":
-                        self.model.half()
-                        logging.info(f"YOLOv8 using FP16 precision on {self.device}")
+                        logging.info(f"YOLOv8 using FP16 precision on {self.device} (handled internally)")
                     elif self.half_precision and self.device != "cpu":
                         logging.info(f"Half precision requested but may not be optimal on {self.device}")
 

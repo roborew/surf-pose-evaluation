@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import mlflow
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,22 @@ class MLflowManager:
             "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results"
         )
         self.runs_dir = self.shared_results_dir / "runs"
+
+    def log_video_sample(self, video_path: str):
+        """Log a video sample as an MLflow artifact
+
+        Args:
+            video_path: Path to the video file to log
+        """
+        try:
+            if os.path.exists(video_path):
+                # Log the video file as an artifact
+                mlflow.log_artifact(video_path, "sample_videos")
+                logger.info(f"Logged video sample: {Path(video_path).name}")
+            else:
+                logger.warning(f"Video file not found for logging: {video_path}")
+        except Exception as e:
+            logger.error(f"Failed to log video sample {video_path}: {e}")
 
     def list_all_experiments(self) -> List[Dict[str, Any]]:
         """List all MLflow experiments across all runs"""
