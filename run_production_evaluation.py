@@ -38,7 +38,7 @@ def parse_arguments():
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose"],
+        default=["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose", "mmpose"],
         help="Models to evaluate",
     )
     parser.add_argument(
