@@ -1,34 +1,99 @@
-# Surf Pose Evaluation
+# 🏄‍♂️ Surf Pose Evaluation
 
-A comprehensive evaluation framework for pose estimation models on surf footage, designed for production use with organized run management and multi-machine collaboration.
+A comprehensive evaluation framework for pose estimation models on surf footage, designed for production use with organized run management and automatic GPU acceleration.
 
-## Features
+## Table of Contents
 
-- **Organized Run Management**: Timestamp-based run organization with isolated directories
-- **Multi-Machine Collaboration**: Shared results directory for team collaboration
-- **MLflow Integration**: Comprehensive experiment tracking with consolidated view
-- **Automated Workflows**: Two-phase evaluation (Optuna optimization + comparison)
-- **Aligned File Naming**: Consistent naming between predictions and visualizations
-- **Performance Metrics**: Comprehensive accuracy and performance benchmarking
-- **GPU Acceleration**: Automatic CUDA/MPS detection with optimal performance settings
+1. [Overview](#overview)
+2. [Setup](#setup)
+3. [Quick Start](#quick-start)
+4. [The Evaluation Pipeline](#the-evaluation-pipeline)
+5. [Configuration](#configuration)
+6. [Running Evaluations](#running-evaluations)
+7. [Understanding Results](#understanding-results)
+8. [GPU Acceleration](#gpu-acceleration)
+9. [Multi-Machine Setup](#multi-machine-setup)
+10. [Troubleshooting](#troubleshooting)
+
+## Overview
+
+This system evaluates pose estimation models (YOLOv8, MediaPipe, MMPose, BlazePose, PyTorch Pose) on surf footage using a **two-phase approach**:
+
+1. **Phase 1: Optuna Optimization** - Find optimal parameters for surf conditions
+2. **Phase 2: Model Comparison** - Compare models using optimized parameters
+
+### Key Features
+
+- **Automated Pipeline**: Complete evaluation with a single command
+- **GPU Acceleration**: CUDA-first with automatic fallback (MPS/CPU)
+- **Organized Results**: Timestamp-based runs with MLflow tracking
+- **Multi-Machine Support**: Shared storage for team collaboration
+- **Surf-Optimized**: Parameters tuned for challenging surf conditions
+
+## Setup
+
+### 1. Environment Setup
+
+Create and activate the conda environment:
+
+```bash
+# For macOS (Apple Silicon/Intel)
+conda env create -f environment_macos.yml
+conda activate surf_pose_eval
+
+# For Linux/Windows
+conda env create -f environment.yml
+conda activate surf_pose_eval
+```
+
+### 2. Verify GPU Setup
+
+Test your GPU acceleration:
+
+```bash
+python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}, MPS: {torch.backends.mps.is_available()}')"
+
+# Or run the comprehensive GPU verification test
+python tests/verify_gpu_setup.py
+```
+
+Expected output:
+
+- **Linux with NVIDIA GPU**: `CUDA: True, MPS: False`
+- **macOS with Apple Silicon**: `CUDA: False, MPS: True`
+- **CPU-only systems**: `CUDA: False, MPS: False`
+
+### 3. Data Setup
+
+Ensure your data follows this structure:
+
+```
+data/SD_02_SURF_FOOTAGE_PREPT/
+├── 03_CLIPPED/
+│   ├── h264/           # H.264 video clips
+│   └── ffv1/           # FFV1 video clips
+├── 04_ANNOTATED/
+│   └── surf-manoeuvre-labels/
+│       ├── sony_300/   # Sony 300mm annotations
+│       └── sony_70/    # Sony 70mm annotations
+└── 05_ANALYSED_DATA/
+    └── POSE/
+        └── results/    # Evaluation results (auto-created)
+```
 
 ## Quick Start
 
-### Basic Usage
+### Run Complete Evaluation
 
 ```bash
-# Run full evaluation with organized runs
+# Full pipeline (optimization + comparison)
 python run_production_evaluation.py
 
-# Run with specific number of clips
+# Test with limited clips (faster)
 python run_production_evaluation.py --max-clips 20
 
-# Run with custom name
-python run_production_evaluation.py --run-name "experiment_v1"
-
-# Skip phases
-python run_production_evaluation.py --skip-optuna
-python run_production_evaluation.py --skip-comparison
+# Custom run name
+python run_production_evaluation.py --run-name "rtx4090_test"
 ```
 
 ### View Results
@@ -37,220 +102,281 @@ python run_production_evaluation.py --skip-comparison
 # Start MLflow UI for all experiments
 python start_mlflow_ui.py
 
-# Show experiments summary
+# View results summary
 python utils/mlflow_utils.py --summary
-
-# View specific run's MLflow
-mlflow ui --backend-store-uri data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/runs/TIMESTAMP_NAME/mlruns
 ```
 
-## GPU Acceleration
+## The Evaluation Pipeline
 
-The system automatically detects and uses the best available acceleration:
-- **Linux/Production**: CUDA + FP16 precision (RTX 4090 optimized)  
-- **macOS/Development**: MPS acceleration where supported
-- **Fallback**: CPU with optimized settings
+### Phase 1: Optuna Optimization (Automatic)
 
-No configuration needed - just run! Test your setup: `python verify_gpu_setup.py`
+**Purpose**: Find optimal parameters for surf conditions  
+**Duration**: ~2-5 hours (depending on hardware)  
+**Config**: `configs/evaluation_config_production_optuna.yaml`
 
-## Directory Structure
+- Tests 50 clips with 100 optimization trials
+- Explores confidence thresholds: 0.05-1.0 (full range for surf conditions)
+- Tests model sizes: nano → large
+- **No visualizations/predictions** (speed focused)
+- **Output**: `results/best_params/best_parameters.yaml`
 
-### Shared Results Directory
+### Phase 2: Model Comparison (Automatic)
 
-All results are stored in the shared POSE directory for multi-machine collaboration:
+**Purpose**: Compare models using optimal parameters  
+**Duration**: ~1-3 hours (depending on dataset size)  
+**Config**: `configs/evaluation_config_production_comparison.yaml`
+
+- Uses full dataset (200+ clips)
+- Loads optimal parameters from Phase 1
+- **Generates visualizations** and prediction files
+- **Output**: Complete analysis with MLflow tracking
+
+### Parameter Flow Between Phases
+
+```yaml
+# Phase 1 Output: results/best_params/best_parameters.yaml
+mediapipe:
+  min_detection_confidence: 0.12 # Optimized for surf conditions
+  model_complexity: 2
+yolov8_pose:
+  model_size: "l" # Large model for accuracy
+  confidence_threshold: 0.08 # Low threshold for challenging frames
+```
+
+These parameters automatically flow to Phase 2 for final comparison.
+
+## Configuration
+
+### Production Configs (Used by Pipeline)
+
+- `evaluation_config_production_optuna.yaml` - Phase 1 optimization
+- `evaluation_config_production_comparison.yaml` - Phase 2 comparison
+
+### Model Configs (Surf-Optimized)
+
+Each model has optimized parameter ranges for surf conditions:
+
+- `model_configs/yolov8_pose.yaml` - YOLOv8 with expanded model sizes
+- `model_configs/mediapipe.yaml` - MediaPipe with full confidence range
+- `model_configs/blazepose.yaml` - BlazePose optimization
+- `model_configs/mmpose.yaml` - MMPose configuration
+- `model_configs/pytorch_pose.yaml` - PyTorch Pose settings
+
+### Key Surf Optimizations
+
+1. **Extended Confidence Range**: 0.05-1.0 (instead of 0.3-0.9)
+2. **All Model Sizes**: From nano to extra-large
+3. **Surf-Specific Parameters**: Segmentation, static image mode
+4. **Challenging Conditions**: Optimized for spray, motion blur, lighting
+
+## Running Evaluations
+
+### Complete Pipeline
+
+```bash
+# Standard full evaluation
+python run_production_evaluation.py
+
+# With custom settings
+python run_production_evaluation.py --max-clips 50 --run-name "experiment_v2"
+```
+
+### Individual Phases
+
+```bash
+# Only optimization phase
+python run_production_evaluation.py --optuna-only
+
+# Only comparison phase (requires existing parameters)
+python run_production_evaluation.py --comparison-only
+
+# Skip optimization (use existing parameters)
+python run_production_evaluation.py --skip-optuna
+```
+
+### Direct Model Evaluation
+
+```bash
+# Test specific models
+python evaluate_pose_models.py configs/evaluation_config_macos.yaml
+
+# With custom models
+python evaluate_pose_models.py configs/evaluation_config_macos.yaml --models yolov8_pose mediapipe
+```
+
+## Understanding Results
+
+### Results Structure
 
 ```
 data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/
-├── runs/                           # Organized runs
-│   ├── 20240315_143022_20clips/    # Timestamped run directory
-│   │   ├── mlruns/                 # MLflow experiments for this run
-│   │   ├── predictions/            # Model predictions
-│   │   ├── visualizations/         # Pose visualizations
-│   │   ├── best_params/            # Optimized parameters
-│   │   ├── reports/                # Evaluation reports
-│   │   ├── run_metadata.json      # Run information
-│   │   └── run_summary.json       # Results summary
-│   └── 20240315_150000_full/       # Another run
-└── ...
+└── runs/
+    └── 20240315_143022_rtx4090_test/    # Timestamped run
+        ├── mlruns/                      # MLflow experiments
+        ├── best_params/                 # Optimal parameters
+        ├── predictions/                 # JSON prediction files
+        ├── visualizations/              # Video overlays
+        ├── reports/                     # Performance reports
+        ├── run_metadata.json           # Run information
+        └── run_summary.json             # Final results
 ```
 
-### File Naming Conventions
+### File Naming Convention
 
-**Predictions**: `maneuver_{type}_{score}_{video_stem}_predictions.json`
-**Visualizations**: `maneuver_{type}_{score}_{video_stem}_poses.mp4`
+**Predictions**: `maneuver_{type}_{score}_{video}_predictions.json`  
+**Visualizations**: `maneuver_{type}_{score}_{video}_poses.mp4`
 
-Examples:
+Example: `maneuver_cutback_85_SONY_70_SESSION_020325_C0010_clip_4_predictions.json`
 
-- `maneuver_cutback_8.5_SONY_70_SESSION_020325_C0010_clip_4_predictions.json`
-- `maneuver_cutback_8.5_SONY_70_SESSION_020325_C0010_clip_4_poses.mp4`
+### MLflow Experiments
 
-## Multi-Machine Workflow
+Each run creates timestamped experiments:
 
-### Setup
+- `surf_pose_production_optuna_20240315_143022` (Phase 1)
+- `surf_pose_production_comparison_20240315_143022` (Phase 2)
 
-1. **Ensure shared directory access**: All machines should have access to the POSE directory
-2. **Run evaluations**: Each machine can run evaluations independently
-3. **View consolidated results**: Use MLflow UI to view all experiments from all machines
+### Key Metrics
 
-### Example Multi-Machine Usage
+- **mAP (mean Average Precision)**: Overall pose accuracy
+- **PCK (Percentage of Correct Keypoints)**: Keypoint accuracy at different thresholds
+- **FPS**: Inference speed
+- **GPU Utilization**: Hardware efficiency
 
-**Machine 1 (20 clips test)**:
+## GPU Acceleration
+
+The system automatically detects and uses optimal acceleration:
+
+### Production (Linux with NVIDIA GPU)
+
+- **CUDA acceleration** for all compatible models
+- **FP16 precision** for RTX 4090/3090 performance
+- **MediaPipe GPU** acceleration enabled
+- **Expected**: 60-80% faster inference
+
+### Development (macOS)
+
+- **MPS acceleration** where supported (YOLOv8, PyTorch)
+- **CPU fallback** for MediaPipe/BlazePose (stability)
+- **Expected**: 30-50% faster inference
+
+### Automatic Configuration
+
+No manual setup required! The system:
+
+1. **Detects hardware** (CUDA → MPS → CPU)
+2. **Configures models** for optimal performance
+3. **Enables FP16** on compatible GPUs
+4. **Logs acceleration status** for verification
+
+## Multi-Machine Setup
+
+### Shared Storage
+
+All results use shared storage for team collaboration:
+
+```
+data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/
+```
+
+### Multi-Machine Workflow
+
+**Machine 1 (Development)**:
 
 ```bash
-python run_production_evaluation.py --max-clips 20 --run-name "quick_test"
+python run_production_evaluation.py --max-clips 20 --run-name "dev_test"
 ```
 
-**Machine 2 (full dataset)**:
+**Machine 2 (Production)**:
 
 ```bash
-python run_production_evaluation.py --run-name "full_eval"
+python run_production_evaluation.py --run-name "production_eval"
 ```
 
-**View all results**:
+**View Combined Results**:
 
 ```bash
 python start_mlflow_ui.py --summary
 ```
 
-## Run Management
+### Benefits
 
-### Organized Runs (Default)
-
-Every run creates a timestamped directory with complete isolation:
-
-- **Automatic organization**: No manual cleanup needed
-- **Machine tracking**: Each run records which machine created it
-- **Timestamped experiments**: MLflow experiments include timestamps
-- **Easy comparison**: Compare results across different runs/machines
-
-### Key Commands
-
-```bash
-# Clean up old runs (keep last 5)
-python run_production_evaluation.py --cleanup
-
-# List all previous runs
-python utils/mlflow_utils.py --compare
-
-# Export experiment data
-python utils/mlflow_utils.py --export results_backup.json
-```
-
-## MLflow Integration
-
-### Experiment Organization
-
-- **Timestamped experiments**: `surf_pose_production_optuna_20240315_143022`
-- **Machine tagging**: Each run tagged with hostname and user
-- **Consolidated view**: Single MLflow UI shows all experiments from all runs
-- **Artifact organization**: Run-specific artifact storage
-
-### Accessing MLflow
-
-```bash
-# View all experiments from all runs
-python start_mlflow_ui.py
-
-# View specific run
-mlflow ui --backend-store-uri data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/runs/TIMESTAMP/mlruns
-
-# Get tracking URI for programmatic access
-python -c "from utils.run_manager import RunManager; print(RunManager.get_shared_mlflow_uri())"
-```
-
-## Configuration
-
-### Base Configuration
-
-The system uses `configs/evaluation_config_production.yaml` as the base configuration. The run manager automatically creates run-specific configs with updated paths.
-
-### Key Configuration Sections
-
-- **Data paths**: Automatically updated for each run
-- **MLflow settings**: Timestamped experiments with run-specific tracking
-- **Output directories**: Isolated per run
-- **Model parameters**: Consistent across runs
-
-## Development
-
-### Adding New Models
-
-1. Create model wrapper in `models/`
-2. Add to `models/enabled_models` in config
-3. Run evaluation to test integration
-
-### Extending Metrics
-
-1. Add metric calculation to `metrics/`
-2. Update config to include new metrics
-3. Verify MLflow logging captures new metrics
-
-### Custom Workflows
-
-```python
-from utils.run_manager import RunManager
-
-# Create custom run
-run_manager = RunManager(run_name="custom_experiment")
-
-# Get run-specific config
-config_path = run_manager.create_config_for_phase(
-    "custom", "configs/base_config.yaml"
-)
-
-# Access directories
-print(f"Predictions: {run_manager.predictions_dir}")
-print(f"MLflow: {run_manager.mlflow_dir}")
-```
-
-## Benefits
-
-### For Development
-
-- **Isolated experiments**: No conflicts between different runs
-- **Easy rollback**: Each run is completely self-contained
-- **Clear organization**: Timestamp-based naming eliminates confusion
-
-### For Production
-
-- **Multi-machine support**: Team can run evaluations simultaneously
-- **Comprehensive tracking**: All experiments tracked in single MLflow instance
-- **Automated cleanup**: Optional cleanup of old runs
-- **Consistent naming**: Aligned file naming across all outputs
-
-### For Analysis
-
-- **Easy comparison**: Compare results across runs and machines
-- **Complete provenance**: Track which machine ran which experiment
-- **Exportable data**: Export experiment data for external analysis
+- **No conflicts**: Timestamp-based isolation
+- **Team collaboration**: Shared MLflow experiments
+- **Easy comparison**: All results in single UI
+- **Complete provenance**: Machine and user tracking
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Directory permissions**: Ensure all machines have read/write access to POSE directory
-2. **MLflow conflicts**: Each run uses isolated MLflow tracking
-3. **Disk space**: Use cleanup functionality to manage storage
+**1. No GPU acceleration detected**
+
+```bash
+# Check drivers and PyTorch installation
+python -c "import torch; print(torch.cuda.is_available())"
+```
+
+**2. MLflow UI won't start**
+
+```bash
+# Check if MLflow is installed
+pip install mlflow
+python start_mlflow_ui.py
+```
+
+**3. Memory issues**
+
+```bash
+# Reduce batch size or use CPU fallback
+python run_production_evaluation.py --max-clips 10
+```
+
+**4. Data path issues**
+
+```bash
+# Verify data structure
+ls -la data/SD_02_SURF_FOOTAGE_PREPT/03_CLIPPED/h264/
+```
 
 ### Debug Commands
 
 ```bash
-# Check run manager status
+# Check system status
 python -c "from utils.run_manager import RunManager; rm = RunManager(); rm.print_run_info()"
 
-# List all experiments
+# List all experiments  
 python utils/mlflow_utils.py --list
 
-# Check directory structure
+# Check specific run
 ls -la data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/runs/
+
+# Run system tests
+python tests/verify_gpu_setup.py          # GPU acceleration
+python tests/test_prediction_system.py    # Prediction files
+python tests/test_zoom_loading.py         # Data loading
 ```
 
-## Migration Notes
+### Performance Optimization
 
-The system no longer supports legacy mode. All runs use the organized structure with the shared POSE directory. This ensures:
+**For RTX 4090/3090**:
 
-- **Consistent behavior**: All runs work the same way
-- **Multi-machine compatibility**: Shared directory enables collaboration
-- **Simplified maintenance**: Single code path reduces complexity
+- Ensure CUDA 11.8+ and compatible PyTorch
+- Enable FP16 precision (automatic)
+- Monitor `nvidia-smi` for GPU utilization
 
-For any questions or issues, refer to the run metadata files or MLflow experiment tracking for detailed information about each run.
+**For macOS**:
+
+- Use Metal Performance Shaders (automatic)
+- Monitor Activity Monitor for GPU usage
+- Consider CPU fallback for stability
+
+---
+
+## Getting Started Summary
+
+1. **Setup environment**: `conda env create -f environment_macos.yml` (or `environment.yml`)
+2. **Activate**: `conda activate surf_pose_eval`
+3. **Run evaluation**: `python run_production_evaluation.py`
+4. **View results**: `python start_mlflow_ui.py`
+
+The system handles everything else automatically! 🚀
