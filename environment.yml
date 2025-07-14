@@ -47,12 +47,12 @@ dependencies:
 
   # Pip dependencies for pose estimation packages
   - pip:
+      # MM packages - exact versions from working environment
+      - mmcv==2.1.0 # Currently installed version
+      - mmengine==0.10.7 # Currently installed version
+      - mmpose==1.3.2 # Currently installed version
+      - mmdet==3.2.0 # Currently installed version
       - opencv-python==4.8.0.76
-      - mmengine>=0.7.4
-      - mmcv>=2.0.0rc4,<2.2.0
-      - mmdet>=3.0.0,<3.3.0
-      - mmpose>=1.1.0,<1.4.0
-      - mediapipe==0.10.14
       - ultralytics==8.0.165
       - xtcocotools==1.12
 
