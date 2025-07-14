@@ -35,8 +35,8 @@ models:
   default_settings:
     confidence_threshold: 0.3
     batch_size: 1
-    device: "cuda"
-    half_precision: false
+    device: "auto" # Auto-detect: CUDA first, then MPS/CPU fallback
+    half_precision: true # Enable FP16 for RTX 4090 performance
 
 # Evaluation configuration - SMALLER DATASET FOR OPTIMIZATION
 evaluation:
@@ -110,7 +110,7 @@ hardware:
 # Output configuration - MINIMAL FOR OPTIMIZATION
 output:
   results_dir: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results"
-  
+
   # Save optimal parameters for next phase
   best_params:
     enabled: true

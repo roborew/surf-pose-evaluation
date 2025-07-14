@@ -40,18 +40,23 @@ class MediaPipeWrapper(BasePoseModel):
         self.load_model()
 
     def load_model(self) -> None:
-        """Load and initialize MediaPipe Pose model with robust error handling"""
-        # Force CPU-only TensorFlow Lite execution for Apple Silicon compatibility
+        """Load and initialize MediaPipe Pose model with CUDA-first approach"""
         import os
+        import platform
 
         os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Suppress TF warnings
-        os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"  # Force CPU only
-        os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"  # Disable GPU memory growth
-
-        # Additional Apple Silicon compatibility settings
-        if "darwin" in os.uname().sysname.lower():
+        
+        # CUDA-first: Enable GPU on Linux, CPU fallback on macOS for stability
+        if platform.system().lower() == "darwin":  # macOS
+            os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"  # CPU for macOS stability
+            os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"
             os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # Disable oneDNN optimizations
             os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Reduce logging
+            logging.info("MediaPipe using CPU on macOS for stability")
+        else:  # Linux/Windows - Enable GPU acceleration
+            os.environ["MEDIAPIPE_DISABLE_GPU"] = "0"  # Enable GPU
+            os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"  # Allow GPU memory growth
+            logging.info("MediaPipe enabling GPU acceleration for production")
 
         try:
             # First try with the configured parameters

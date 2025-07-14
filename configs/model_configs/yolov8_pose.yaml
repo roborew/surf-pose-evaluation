@@ -12,7 +12,7 @@ iou_threshold: 0.45
 max_detections: 300
 
 # Performance settings
-half_precision: false # Use FP16 for faster inference
+half_precision: true # Use FP16 for faster inference on CUDA
 device_specific_optimization: true
 
 # Pose-specific settings

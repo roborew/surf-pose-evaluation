@@ -25,10 +25,15 @@ class PyTorchPoseWrapper(BasePoseModel):
             device: Compute device ('cpu', 'cuda', 'mps')
             **kwargs: Model configuration
         """
-        # Force CPU for PyTorch models on Apple Silicon due to MPS issues
+        # CUDA-first approach: Use CUDA on Linux, graceful fallback on macOS
+        import platform
         if device == "mps":
-            print("Warning: PyTorch KeypointRCNN has MPS compatibility issues, forcing CPU usage")
-            device = "cpu"
+            if platform.system().lower() == "darwin" and torch.backends.mps.is_available():
+                print("Using MPS acceleration on macOS (may have some compatibility issues)")
+                # Keep MPS for macOS
+            else:
+                print("Warning: MPS requested but not available, falling back to CPU")
+                device = "cpu"
         
         super().__init__(device, **kwargs)
 

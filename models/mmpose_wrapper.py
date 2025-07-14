@@ -38,22 +38,29 @@ class MMPoseWrapper(BasePoseModel):
         self.kpt_thr = kwargs.get("kpt_thr", 0.3)
         self.bbox_thr = kwargs.get("bbox_thr", 0.3)
 
-        # Map device (MMPose may not support MPS)
-        self.mmpose_device = device if device != "mps" else "cpu"
+        # CUDA-first: Use CUDA on Linux, fallback for macOS
+        if device == "cuda":
+            self.mmpose_device = "cuda"  # Use CUDA when available
+        elif device == "mps":
+            self.mmpose_device = "cpu"  # MPS not well supported, use CPU on macOS
+        else:
+            self.mmpose_device = "cpu"
 
         self.inferencer = None
         self.load_model()
 
     def load_model(self) -> None:
-        """Load MMPose inferencer using the simple approach"""
+        """Load MMPose inferencer with CUDA-first approach"""
         try:
-            # Use the exact same simple initialization that works
-            # Force CPU device to avoid MPS issues with NMS implementation
+            # Initialize with detected device (CUDA prioritized)
             self.inferencer = MMPoseInferencer("human", device=self.mmpose_device)
             self.is_initialized = True
-            print(
-                f"MMPose initialized successfully with 'human' model on {self.mmpose_device}"
-            )
+            
+            if self.mmpose_device == "cuda":
+                print(f"MMPose initialized with CUDA acceleration on {self.mmpose_device}")
+            else:
+                print(f"MMPose initialized on {self.mmpose_device} (CPU fallback)")
+        
 
         except Exception as e:
             raise RuntimeError(f"Failed to initialize MMPose: {e}")

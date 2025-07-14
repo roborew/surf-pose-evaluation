@@ -6,12 +6,21 @@ Main evaluation script for comparing pose estimation models
 
 # Set MediaPipe/TensorFlow environment variables before any imports
 import os
+import platform
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Suppress TF warnings
-os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"  # Force CPU only
-os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"  # Disable GPU memory growth
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # Disable oneDNN optimizations for macOS
-os.environ["TF_DISABLE_MKL"] = "1"  # Disable Intel MKL
+# Suppress TensorFlow warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
+# CUDA-first approach: Enable GPU on Linux, fallback to CPU on macOS for stability
+if platform.system().lower() == "darwin":  # macOS
+    os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"  # Keep CPU for macOS stability
+    os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"
+    os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # Disable oneDNN optimizations for macOS
+    os.environ["TF_DISABLE_MKL"] = "1"  # Disable Intel MKL
+else:  # Linux/Windows - Enable GPU acceleration
+    os.environ["MEDIAPIPE_DISABLE_GPU"] = "0"  # Enable GPU acceleration
+    os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"  # Allow GPU memory growth
+
 os.environ["TF_DISABLE_SEGMENT_REDUCTION_OP_DETERMINISM_EXCEPTIONS"] = "1"  # Stability
 
 import argparse
@@ -120,16 +129,20 @@ class PoseEvaluator:
             return yaml.safe_load(f)
 
     def _setup_device(self) -> str:
-        """Setup compute device based on availability"""
+        """Setup compute device with CUDA-first priority for production"""
         device = self.config.get("device", "auto")
 
         if device == "auto":
+            # CUDA-first approach for production environments
             if torch.cuda.is_available():
                 device = "cuda"
+                logging.info(f"CUDA detected: {torch.cuda.get_device_name()}")
             elif torch.backends.mps.is_available():
                 device = "mps"
+                logging.info("MPS detected (Apple Silicon)")
             else:
                 device = "cpu"
+                logging.info("No GPU acceleration available, using CPU")
 
         logging.info(f"Using device: {device}")
         return device

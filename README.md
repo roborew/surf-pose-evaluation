@@ -10,6 +10,7 @@ A comprehensive evaluation framework for pose estimation models on surf footage,
 - **Automated Workflows**: Two-phase evaluation (Optuna optimization + comparison)
 - **Aligned File Naming**: Consistent naming between predictions and visualizations
 - **Performance Metrics**: Comprehensive accuracy and performance benchmarking
+- **GPU Acceleration**: Automatic CUDA/MPS detection with optimal performance settings
 
 ## Quick Start
 
@@ -42,6 +43,15 @@ python utils/mlflow_utils.py --summary
 # View specific run's MLflow
 mlflow ui --backend-store-uri data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/runs/TIMESTAMP_NAME/mlruns
 ```
+
+## GPU Acceleration
+
+The system automatically detects and uses the best available acceleration:
+- **Linux/Production**: CUDA + FP16 precision (RTX 4090 optimized)  
+- **macOS/Development**: MPS acceleration where supported
+- **Fallback**: CPU with optimized settings
+
+No configuration needed - just run! Test your setup: `python verify_gpu_setup.py`
 
 ## Directory Structure
 

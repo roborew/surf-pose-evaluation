@@ -87,12 +87,15 @@ class YOLOv8Wrapper(BasePoseModel):
                     # Move to device
                     self.model.to(self.device)
 
-                    # Set precision
-                    if self.half_precision and self.device != "cpu":
+                    # Set precision based on device capabilities
+                    if self.half_precision and self.device == "cuda":
                         self.model.half()
+                        logging.info(f"YOLOv8 using FP16 precision on {self.device}")
+                    elif self.half_precision and self.device != "cpu":
+                        logging.info(f"Half precision requested but may not be optimal on {self.device}")
 
                     self.is_initialized = True
-                    logging.info(f"Successfully loaded YOLOv8-{self.model_size}-pose")
+                    logging.info(f"Successfully loaded YOLOv8-{self.model_size}-pose on {self.device}")
                     return
 
                 except Exception as e:
