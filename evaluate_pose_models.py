@@ -109,7 +109,13 @@ class PoseEvaluator:
                 prediction_base_path = shared_storage_path
                 logging.info(f"Using shared prediction storage: {prediction_base_path}")
             else:
-                prediction_base_path = prediction_config.get("base_path", "predictions")
+                # Default to a timestamped predictions directory in the data hierarchy
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                prediction_base_path = prediction_config.get(
+                    "base_path",
+                    f"./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/manual_run_{timestamp}/predictions",
+                )
                 logging.info(f"Using local prediction storage: {prediction_base_path}")
 
             self.prediction_handler = PredictionFileHandler(prediction_base_path)

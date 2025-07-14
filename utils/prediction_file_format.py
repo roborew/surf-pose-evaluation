@@ -136,9 +136,16 @@ class PredictionFileHandler:
         """Initialize prediction file handler
 
         Args:
-            base_path: Base path for storing prediction files
+            base_path: Base path for storing prediction files. Must be provided to avoid
+                      creating files in the project root.
         """
-        self.base_path = Path(base_path) if base_path else Path("predictions")
+        if base_path is None:
+            raise ValueError(
+                "base_path must be provided for PredictionFileHandler. "
+                "Predictions should be stored in run-specific directories, "
+                "not in the project root."
+            )
+        self.base_path = Path(base_path)
         self.base_path.mkdir(parents=True, exist_ok=True)
 
     def convert_model_prediction_to_standard(

@@ -1,0 +1,99 @@
+# Development/Testing Configuration for Surfing Pose Estimation
+# This config allows quick testing with limited cameras and clips
+
+# Experiment metadata
+experiment:
+  name: "surf_pose_dev_test"
+  description: "Development and testing configuration with limited scope"
+  version: "1.0"
+  author: "Development Team"
+
+# Dataset configuration
+dataset:
+  base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
+  video_clips:
+    h264_path: "03_CLIPPED/h264"
+    ffv1_path: "03_CLIPPED/ffv1"
+    input_format: "h264" # Development uses h264 format on macOS
+  annotations:
+    labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
+    sony_300_labels: "sony_300"
+    sony_70_labels: "sony_70"
+
+  # Camera selection for development - limit to one camera for faster testing
+  camera_selection:
+    enabled_cameras: ["SONY_70"] # Only use SONY_70 for development
+    # For full testing, use: ["SONY_300", "SONY_70"]
+    # For fastest testing, use: ["SONY_70"]
+
+  splits:
+    train_ratio: 0.70
+    val_ratio: 0.15
+    test_ratio: 0.15
+    random_seed: 42
+
+  # Zoom variation handling to prevent data leakage
+  zoom_handling:
+    enabled: true
+    balanced_distribution: true
+    target_distribution:
+      default: 0.33 # ~33% of clips use default zoom (C0019_clip_1.mp4)
+      wide: 0.33 # ~33% of clips use wide zoom (C0019_clip_1_wide.mp4)
+      full: 0.34 # ~34% of clips use full zoom (C0019_clip_1_full.mp4)
+    randomized_selection: true # Randomize zoom selection within balanced constraints
+
+# Model configuration - reduced for development
+models:
+  enabled_models:
+    - "mediapipe" # Start with just one model for development
+    # Add more models as needed:
+    # - "blazepose"
+    # - "yolov8_pose"
+    # - "pytorch_pose"
+  default_settings:
+    confidence_threshold: 0.3
+    batch_size: 1
+    device: "auto" # Auto-detect: MPS for Mac, CUDA for GPU
+    half_precision: false # Disable for better debugging
+
+# Evaluation configuration - VERY SMALL DATASET FOR DEVELOPMENT
+evaluation:
+  quick_test:
+    num_clips: 5 # Very small for development
+    max_duration_seconds: 5
+    cameras: ["SONY_70"] # Deprecated: Use dataset.camera_selection.enabled_cameras
+  comprehensive_test:
+    num_clips: 10 # Small for development
+    max_duration_seconds: 10
+    cameras: ["SONY_70"] # Deprecated: Use dataset.camera_selection.enabled_cameras
+
+  # Metrics to track
+  metrics:
+    pose_accuracy:
+      enabled: true
+      keypoint_threshold: 0.5
+    inference_speed:
+      enabled: true
+      target_fps: 25
+    resource_usage:
+      enabled: true
+      track_memory: true
+      track_gpu: false # Set to true if using GPU
+
+# Output settings
+output:
+  base_dir: "./data/SD_02_SURF_FOOTAGE_PREPT/RESULTS"
+  save_predictions: true
+  save_visualizations: false # Disable for faster development
+  create_summary_video: false # Disable for faster development
+  
+  # Predictions configuration
+  predictions:
+    enabled: true
+    base_path: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/dev_runs/predictions"
+
+# Logging configuration
+logging:
+  level: "INFO" # Use "DEBUG" for more verbose output
+  save_logs: true
+  log_dir: "./logs"

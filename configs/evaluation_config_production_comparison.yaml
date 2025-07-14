@@ -14,11 +14,18 @@ dataset:
   video_clips:
     h264_path: "03_CLIPPED/h264"
     ffv1_path: "03_CLIPPED/ffv1"
-    input_format: "ffv1" # High quality for final comparison
+    input_format: "ffv1" # Production uses ffv1 format
   annotations:
     labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
     sony_300_labels: "sony_300"
     sony_70_labels: "sony_70"
+
+  # Camera selection for evaluation
+  camera_selection:
+    enabled_cameras: ["SONY_300", "SONY_70"] # Available: ["SONY_300", "SONY_70"]
+    # For development/testing, you can limit to specific cameras:
+    # enabled_cameras: ["SONY_70"]  # Only use SONY_70 for faster testing
+
   splits:
     train_ratio: 0.70
     val_ratio: 0.15
@@ -35,8 +42,8 @@ models:
   default_settings:
     confidence_threshold: 0.3
     batch_size: 1
-    device: "auto"  # Auto-detect: CUDA first, then MPS/CPU fallback
-    half_precision: true  # Enable FP16 for RTX 4090 performance
+    device: "auto" # Auto-detect: CUDA first, then MPS/CPU fallback
+    half_precision: true # Enable FP16 for RTX 4090 performance
 
   # Load optimal parameters from Optuna phase
   load_best_params:
@@ -110,8 +117,8 @@ output:
   # Full prediction storage
   predictions:
     enabled: true
-    base_path: "predictions"
-    shared_storage_path: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/predictions"
+    base_path: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/production_comparison/predictions"
+    shared_storage_path: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/production_comparison/predictions"
     format: "json"
     include_metadata: true
     compress: false

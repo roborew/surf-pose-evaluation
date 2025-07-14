@@ -114,61 +114,152 @@ def extract_best_parameters(run_manager: RunManager, models: list):
 
     try:
         import mlflow
+        import os
 
         # Connect to MLflow
-        mlflow.set_tracking_uri(str(run_manager.mlflow_dir))
+        mlflow_dir = run_manager.mlflow_dir
+        tracking_uri = str(mlflow_dir)
+        logger.info(f"🔗 Setting MLflow tracking URI: {tracking_uri}")
+        mlflow.set_tracking_uri(tracking_uri)
+
+        # Check if MLflow directory exists and has content
+        if not mlflow_dir.exists():
+            logger.error(f"❌ MLflow directory does not exist: {mlflow_dir}")
+            return False
+
+        # List contents of MLflow directory for debugging
+        try:
+            mlflow_contents = list(mlflow_dir.iterdir())
+            logger.info(
+                f"📁 MLflow directory contents: {[item.name for item in mlflow_contents]}"
+            )
+        except Exception as e:
+            logger.error(f"❌ Could not list MLflow directory contents: {e}")
 
         # Get the Optuna experiment with timestamp suffix
         experiment_name = f"surf_pose_production_optuna_{run_manager.timestamp}"
+        logger.info(f"🔍 Looking for experiment: {experiment_name}")
+
         experiment = mlflow.get_experiment_by_name(experiment_name)
         if not experiment:
             logger.error(f"❌ Optuna experiment not found: {experiment_name}")
+
             # Try to list available experiments for debugging
             try:
                 all_experiments = mlflow.search_experiments()
-                logger.info(f"Available experiments: {[exp.name for exp in all_experiments]}")
+                experiment_names = [exp.name for exp in all_experiments]
+                logger.info(
+                    f"📋 Available experiments ({len(experiment_names)}): {experiment_names}"
+                )
+
+                # Try to find any experiment with "optuna" in the name
+                optuna_experiments = [
+                    name for name in experiment_names if "optuna" in name.lower()
+                ]
+                if optuna_experiments:
+                    logger.info(
+                        f"🔍 Found Optuna-related experiments: {optuna_experiments}"
+                    )
+
+                    # Try using the most recent Optuna experiment
+                    if len(optuna_experiments) == 1:
+                        logger.info(
+                            f"🔄 Attempting to use found Optuna experiment: {optuna_experiments[0]}"
+                        )
+                        experiment = mlflow.get_experiment_by_name(
+                            optuna_experiments[0]
+                        )
+                        if experiment:
+                            logger.info(
+                                f"✅ Successfully found alternative experiment: {optuna_experiments[0]}"
+                            )
+                else:
+                    logger.warning("⚠️ No Optuna-related experiments found")
+
             except Exception as e:
-                logger.error(f"Could not list experiments: {e}")
-            return False
+                logger.error(f"❌ Could not list experiments: {e}")
+
+            if not experiment:
+                return False
+
+        logger.info(
+            f"✅ Found experiment: {experiment.name} (ID: {experiment.experiment_id})"
+        )
 
         best_params = {}
 
         # For each model, find the best_full_eval run
         for model in models:
-            runs = mlflow.search_runs(
-                experiment_ids=[experiment.experiment_id],
-                filter_string=f"tags.mlflow.runName LIKE '{model}_optuna_best_full_eval'",
-                max_results=1,
-            )
+            logger.info(f"🔍 Searching for best parameters for model: {model}")
 
-            if runs.empty:
-                logger.warning(f"⚠️ No best full eval run found for {model}")
+            try:
+                runs = mlflow.search_runs(
+                    experiment_ids=[experiment.experiment_id],
+                    filter_string=f"tags.mlflow.runName LIKE '{model}_optuna_best_full_eval'",
+                    max_results=1,
+                )
+
+                if runs.empty:
+                    logger.warning(f"⚠️ No best full eval run found for {model}")
+
+                    # Try alternative search patterns
+                    alternative_patterns = [
+                        f"run_name LIKE '{model}_optuna_best%'",
+                        f"tags.mlflow.runName LIKE '{model}_best%'",
+                        f"params.model_name = '{model}' AND tags.mlflow.runName LIKE '%best%'",
+                    ]
+
+                    for pattern in alternative_patterns:
+                        try:
+                            runs = mlflow.search_runs(
+                                experiment_ids=[experiment.experiment_id],
+                                filter_string=pattern,
+                                max_results=1,
+                            )
+                            if not runs.empty:
+                                logger.info(
+                                    f"✅ Found run using alternative pattern: {pattern}"
+                                )
+                                break
+                        except Exception as e:
+                            logger.debug(f"Alternative pattern failed: {pattern} - {e}")
+
+                    if runs.empty:
+                        logger.warning(f"⚠️ No runs found for {model} with any pattern")
+                        continue
+
+                run = runs.iloc[0]
+                model_params = {}
+
+                # Extract parameters (filter out non-hyperparameters)
+                params_dict = run.params if hasattr(run, "params") else {}
+                if hasattr(params_dict, "items"):
+                    for param_name, param_value in params_dict.items():
+                        if not param_name.startswith(
+                            ("model_name", "optimization_mode", "data_scope", "purpose")
+                        ):
+                            model_params[param_name] = param_value
+                else:
+                    # If params is a Series, convert to dict
+                    params_dict = (
+                        run.params.to_dict() if hasattr(run.params, "to_dict") else {}
+                    )
+                    for param_name, param_value in params_dict.items():
+                        if not param_name.startswith(
+                            ("model_name", "optimization_mode", "data_scope", "purpose")
+                        ):
+                            model_params[param_name] = param_value
+
+                best_params[model] = model_params
+                logger.info(f"✅ Extracted best parameters for {model}: {model_params}")
+
+            except Exception as e:
+                logger.error(f"❌ Failed to extract parameters for {model}: {e}")
                 continue
 
-            run = runs.iloc[0]
-            model_params = {}
-
-            # Extract parameters (filter out non-hyperparameters)
-            params_dict = run.params if hasattr(run, "params") else {}
-            if hasattr(params_dict, "items"):
-                for param_name, param_value in params_dict.items():
-                    if not param_name.startswith(
-                        ("model_name", "optimization_mode", "data_scope", "purpose")
-                    ):
-                        model_params[param_name] = param_value
-            else:
-                # If params is a Series, convert to dict
-                params_dict = (
-                    run.params.to_dict() if hasattr(run.params, "to_dict") else {}
-                )
-                for param_name, param_value in params_dict.items():
-                    if not param_name.startswith(
-                        ("model_name", "optimization_mode", "data_scope", "purpose")
-                    ):
-                        model_params[param_name] = param_value
-
-            best_params[model] = model_params
-            logger.info(f"✅ Extracted best parameters for {model}: {model_params}")
+        if not best_params:
+            logger.error("❌ No best parameters found for any model")
+            return False
 
         # Save best parameters
         best_params_file = run_manager.best_params_dir / "best_parameters.yaml"
@@ -176,10 +267,16 @@ def extract_best_parameters(run_manager: RunManager, models: list):
             yaml.dump(best_params, f, default_flow_style=False)
 
         logger.info(f"💾 Best parameters saved to {best_params_file}")
+        logger.info(
+            f"📊 Successfully extracted parameters for {len(best_params)} models: {list(best_params.keys())}"
+        )
         return True
 
     except Exception as e:
         logger.error(f"❌ Failed to extract best parameters: {e}")
+        import traceback
+
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return False
 
 

@@ -180,6 +180,12 @@ class SurfingDataLoader:
             },
         )
 
+        # Camera selection configuration
+        self.camera_config = self.dataset_config.get("camera_selection", {})
+        self.enabled_cameras = self.camera_config.get(
+            "enabled_cameras", ["SONY_300", "SONY_70"]
+        )
+
         # Initialize containers
         self.all_clips: List[VideoClip] = []
         self.annotations_data: Dict = {}
@@ -187,6 +193,7 @@ class SurfingDataLoader:
         self.zoom_groups: Dict[str, List[VideoClip]] = defaultdict(list)
 
         logger.info(f"Initialized SurfingDataLoader with base path: {self.base_path}")
+        logger.info(f"Enabled cameras: {self.enabled_cameras}")
         if self.zoom_config.get("enabled", True):
             logger.info("Zoom-aware processing enabled with balanced distribution")
 
@@ -268,16 +275,26 @@ class SurfingDataLoader:
         else:
             return "default", stem
 
-    def discover_video_clips(self, video_format: str = "h264") -> List[VideoClip]:
+    def discover_video_clips(
+        self, video_format: Optional[str] = None
+    ) -> List[VideoClip]:
         """
         Discover all video clips in the specified format, grouping by zoom variations.
 
         Args:
-            video_format: Video format to load ("h264" or "ffv1")
+            video_format: Video format to load ("h264" or "ffv1"). If None, uses config setting.
 
         Returns:
             List of VideoClip objects with balanced zoom distribution
         """
+        # Load annotations if not already loaded
+        if not self.annotations_data:
+            self.annotations_data = self.load_annotations()
+
+        # Use video format from config if not specified
+        if video_format is None:
+            video_format = self.video_clips_config.get("input_format", "h264")
+
         if video_format == "h264":
             clips_path = self.base_path / self.video_clips_config["h264_path"]
             file_extension = "*.mp4"
@@ -313,65 +330,98 @@ class SurfingDataLoader:
                     group_key = f"{camera_name}_{session_name}_{base_clip_id}"
                     zoom_groups[group_key][zoom_level].append(video_file)
 
-        # Second pass: Select one zoom variation per base clip with balanced distribution
+        # Second pass: Select clips with annotations using balanced zoom distribution
         selected_clips = []
         zoom_counters = Counter()
         target_dist = self.zoom_config.get(
             "target_distribution", {"default": 0.33, "wide": 0.33, "full": 0.34}
         )
 
-        # Convert to list for shuffling
+        # Convert to list for shuffling to randomize selection order
         group_items = list(zoom_groups.items())
         random.shuffle(group_items)
 
+        # Process groups with balanced zoom selection
         for group_key, zoom_variants in group_items:
-            # Determine which zoom level to use for this clip
-            selected_zoom = self._select_balanced_zoom(
-                zoom_variants, zoom_counters, target_dist
-            )
+            # Initialize variables for this group
+            selected_file = None
+            selected_zoom = None
 
-            if selected_zoom and selected_zoom in zoom_variants:
-                video_files = zoom_variants[selected_zoom]
+            # Check if this base clip has annotations by looking up the base clip name
+            # All zoom variants share the same base clip ID and therefore the same annotations
+            base_clip_annotation_key = None
 
-                # Check which files have annotations
-                annotated_files = []
-                for video_file in video_files:
-                    relative_path = str(video_file.relative_to(self.base_path))
-                    
-                    # For FFV1 format, we need to look up annotations using the corresponding H.264 path
-                    # since annotation files reference H.264 files
-                    if video_format == "ffv1":
-                        # Convert FFV1 path to corresponding H.264 path for annotation lookup
-                        # e.g., "03_CLIPPED/ffv1/SONY_300/SESSION_060325/C0019_clip_1.mkv"
-                        # becomes "03_CLIPPED/h264/SONY_300/SESSION_060325/C0019_clip_1.mp4"
-                        h264_path = relative_path.replace("03_CLIPPED/ffv1/", "03_CLIPPED/h264/")
-                        h264_path = h264_path.replace(".mkv", ".mp4")
-                        annotation_lookup_path = h264_path
+            # Extract base clip info from group key
+            # Only process SONY cameras (SONY_70, SONY_300) as GP1/GP2 don't have annotations
+            # Group key format: "SONY_XXX_SESSION_YYYYMMDD_CLIPID"
+            # Example: "SONY_300_SESSION_060325_C0019_clip_1"
+            parts = group_key.split("_")
+
+            # Skip non-SONY cameras (GP1, GP2, etc.) as they don't have annotations
+            if not group_key.startswith("SONY_"):
+                continue
+
+            # Extract camera name from group key and check if it's enabled
+            parts = group_key.split("_")
+            if len(parts) >= 2:
+                camera_name = f"{parts[0]}_{parts[1]}"  # e.g., "SONY_300" or "SONY_70"
+                if camera_name not in self.enabled_cameras:
+                    continue
+
+            if len(parts) >= 6:
+                # SONY camera format: SONY_300_SESSION_060325_C0019_clip_1
+                camera = f"{parts[0]}_{parts[1]}"  # e.g., "SONY_300" or "SONY_70"
+                session = f"{parts[2]}_{parts[3]}"  # e.g., "SESSION_060325"
+                base_clip_id = "_".join(parts[4:])  # e.g., "C0019_clip_1"
+
+                # Create the annotation lookup key (always references the base/default clip)
+                # Annotations always reference h264 paths regardless of video format being processed
+                base_clip_annotation_key = (
+                    f"03_CLIPPED/h264/{camera}/{session}/{base_clip_id}.mp4"
+                )
+            else:
+                continue  # Skip malformed group keys
+
+            # Check if base clip has annotations
+            if (
+                base_clip_annotation_key
+                and base_clip_annotation_key in self.annotations_data
+            ):
+                # This base clip has annotations - all zoom variants can use these annotations
+                available_zoom_variants = list(zoom_variants.keys())
+
+                if available_zoom_variants:
+                    # Select zoom level using balanced distribution
+                    selected_zoom = self._select_balanced_zoom(
+                        zoom_variants, zoom_counters, target_dist
+                    )
+
+                    if selected_zoom and selected_zoom in zoom_variants:
+                        selected_file = zoom_variants[selected_zoom][
+                            0
+                        ]  # Take first video file for this zoom
                     else:
-                        annotation_lookup_path = relative_path
-                    
-                    if annotation_lookup_path in self.annotations_data:
-                        annotated_files.append(video_file)
+                        # Fallback: take any available zoom variant
+                        selected_zoom = available_zoom_variants[0]
+                        selected_file = zoom_variants[selected_zoom][0]
 
-                # Use annotated file if available, otherwise skip
-                if annotated_files:
-                    selected_file = annotated_files[0]  # Use first annotated file
+            # Create clip if we found an annotated file
+            if selected_file and selected_zoom:
+                try:
+                    # Extract camera and session from path
+                    path_parts = selected_file.relative_to(clips_path).parts
+                    camera = path_parts[0]
+                    session = path_parts[1]
 
-                    try:
-                        # Extract camera and session from path
-                        path_parts = selected_file.relative_to(clips_path).parts
-                        camera = path_parts[0]
-                        session = path_parts[1]
+                    clip = self._create_video_clip(
+                        selected_file, camera, session, video_format, selected_zoom
+                    )
+                    if clip and clip.annotations:  # Only add clips with annotations
+                        selected_clips.append(clip)
+                        zoom_counters[selected_zoom] += 1
 
-                        clip = self._create_video_clip(
-                            selected_file, camera, session, video_format, selected_zoom
-                        )
-                        if clip and clip.annotations:  # Only add clips with annotations
-                            selected_clips.append(clip)
-                            zoom_counters[selected_zoom] += 1
-
-                    except Exception as e:
-                        logger.warning(f"Failed to process {selected_file}: {e}")
+                except Exception as e:
+                    logger.warning(f"Failed to process {selected_file}: {e}")
 
         self.all_clips = selected_clips
 
@@ -473,18 +523,20 @@ class SurfingDataLoader:
 
             # Get relative path for annotation lookup
             relative_path = str(video_path.relative_to(self.base_path))
-            
-            # For FFV1 format, we need to look up annotations using the corresponding H.264 path
-            # since annotation files reference H.264 files
+
+            # For annotation lookup, we always use the base clip name (without zoom suffix)
+            # because annotations are stored for base clips only
+            parent_dir = str(video_path.parent.relative_to(self.base_path))
+            base_filename = f"{base_clip_id}.mp4"  # Always .mp4 for annotation lookup
+
             if format == "ffv1":
-                # Convert FFV1 path to corresponding H.264 path for annotation lookup
-                # e.g., "03_CLIPPED/ffv1/SONY_300/SESSION_060325/C0019_clip_1.mkv"
-                # becomes "03_CLIPPED/h264/SONY_300/SESSION_060325/C0019_clip_1.mp4"
-                h264_path = relative_path.replace("03_CLIPPED/ffv1/", "03_CLIPPED/h264/")
-                h264_path = h264_path.replace(".mkv", ".mp4")
-                annotation_lookup_path = h264_path
+                # For FFV1 format, map to corresponding H.264 path for annotation lookup
+                # e.g., "03_CLIPPED/ffv1/SONY_300/SESSION_060325" -> "03_CLIPPED/h264/SONY_300/SESSION_060325"
+                h264_dir = parent_dir.replace("03_CLIPPED/ffv1/", "03_CLIPPED/h264/")
+                annotation_lookup_path = f"{h264_dir}/{base_filename}"
             else:
-                annotation_lookup_path = relative_path
+                # For H.264 format, use base clip name in same directory
+                annotation_lookup_path = f"{parent_dir}/{base_filename}"
 
             # Get annotations for this video using the appropriate lookup path
             annotations = self.annotations_data.get(annotation_lookup_path, [])
@@ -637,7 +689,7 @@ class SurfingDataLoader:
         self,
         max_clips: Optional[int] = None,
         split: str = "test",
-        video_format: str = "h264",
+        video_format: Optional[str] = None,
     ) -> List[VideoClip]:
         """
         Load clips for evaluation - convenience method for the evaluation script.
@@ -645,11 +697,15 @@ class SurfingDataLoader:
         Args:
             max_clips: Maximum number of clips to load
             split: Data split to use ("train", "val", "test")
-            video_format: Video format to use ("h264" or "ffv1")
+            video_format: Video format to use ("h264" or "ffv1"). If None, uses config setting.
 
         Returns:
             List of VideoClip objects ready for evaluation
         """
+        # Use video format from config if not specified
+        if video_format is None:
+            video_format = self.video_clips_config.get("input_format", "h264")
+
         # Initialize if not already done
         if not self.all_clips:
             logger.info("Loading annotations...")
@@ -670,7 +726,7 @@ class SurfingDataLoader:
         self,
         max_clips: Optional[int] = None,
         split: str = "test",
-        video_format: str = "h264",
+        video_format: Optional[str] = None,
         maneuvers_per_clip: Optional[int] = None,
     ) -> List[Maneuver]:
         """
@@ -679,7 +735,7 @@ class SurfingDataLoader:
         Args:
             max_clips: Maximum number of clips to load maneuvers from
             split: Data split to use ("train", "val", "test")
-            video_format: Video format to use ("h264" or "ffv1")
+            video_format: Video format to use ("h264" or "ffv1"). If None, uses config setting.
             maneuvers_per_clip: Maximum maneuvers per clip (None for all)
 
         Returns:
