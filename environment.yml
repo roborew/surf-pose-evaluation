@@ -12,11 +12,11 @@ dependencies:
   - setuptools
   - wheel
 
-  # PyTorch ecosystem (compatible with CUDA 12.6)
-  - pytorch>=2.1
-  - torchvision>=0.16
-  - torchaudio>=2.1
-  - pytorch-cuda=12.4
+  # CUDA and PyTorch ecosystem
+  - pytorch=2.1.*
+  - torchvision=0.16.*
+  - torchaudio=2.1.*
+  - pytorch-cuda=11.8
 
   # Core ML and scientific computing
   - numpy>=1.24,<1.25
@@ -27,7 +27,7 @@ dependencies:
   - seaborn>=0.12,<0.13
   - pillow>=9.0,<10.0
 
-  # Media processing (use system ffmpeg)
+  # Media processing
   - imageio>=2.31
   - imageio-ffmpeg>=0.4
 
