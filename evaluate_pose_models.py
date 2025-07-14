@@ -65,6 +65,8 @@ try:
 except ImportError:
     MMPoseWrapper = None
 
+# MMPose wrapper - simple direct approach only
+
 try:
     from models.yolov8_wrapper import YOLOv8Wrapper
 except ImportError:

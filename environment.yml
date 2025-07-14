@@ -12,61 +12,54 @@ dependencies:
   - setuptools
   - wheel
 
-  # CUDA and PyTorch ecosystem
-  - pytorch=2.1.*
-  - torchvision=0.16.*
-  - torchaudio=2.1.*
-  - pytorch-cuda=11.8
-  - cudatoolkit=11.8
+  # CUDA and PyTorch ecosystem (CUDA 12.1 for RTX 3090/4090)
+  - pytorch=2.1.0
+  - torchvision=0.16.0
+  - torchaudio=2.1.0
+  - pytorch-cuda=12.1
 
   # Core ML and scientific computing
-  - numpy>=1.24,<1.25
-  - scipy>=1.11,<1.12
-  - scikit-learn>=1.3,<1.4
-  - pandas>=2.0,<2.1
-  - matplotlib>=3.7,<3.8
-  - seaborn>=0.12,<0.13
-  - pillow>=9.0,<10.0
+  - numpy=1.24.3
+  - scipy=1.11.1
+  - scikit-learn=1.3.0
+  - pandas=2.0.3
+  - matplotlib=3.7.2
+
+  - pillow=9.4.0
 
   # Media processing
-  - ffmpeg>=6.0
-  - imageio>=2.31
-  - imageio-ffmpeg>=0.4
+  - imageio=2.31.1
 
-  # Code quality and testing
-  - black>=23.0
-  - flake8>=6.0
-  - pytest>=7.0
-  - pytest-cov>=4.0
-
-  # Visualization
-  - plotly>=5.15
+  # Development and testing
+  - pytest=7.4.0
 
   # ML experiment tracking and optimization
-  - mlflow>=2.5
-  - optuna>=3.2
-  - tensorboard>=2.13
-
-  # Pose estimation dependencies
-  - cython>=0.29
-  - pyyaml>=6.0
-  - requests>=2.31
-  - tqdm>=4.65
-  - terminaltables>=3.1
+  - mlflow=2.5.0
+  - optuna=3.2.0
 
   # Additional utilities
-  - click>=8.1
-  - colorama>=0.4
-  - rich>=13.0
-  - typer>=0.9
+  - pyyaml=6.0
+  - tqdm=4.65.0
+  - rich=13.4.2
 
   # Pip dependencies for pose estimation packages
   - pip:
+      # OpenCV
       - opencv-python==4.8.0.76
-      - mmengine==0.8.4
-      - mmcv==2.0.1
-      - mmpose==1.1.0
-      - mmdet==3.1.0
+
+      # MediaPipe for pose estimation
       - mediapipe==0.10.14
+
+      # YOLOv8 from Ultralytics
       - ultralytics==8.0.165
-      - xtcocotools==1.12
+
+      # Additional utilities
+      - termcolor==2.3.0
+      - psutil==5.9.5
+
+    # Note: MMPose installed via setup script after environment creation
+
+# Environment variables for CUDA optimization
+variables:
+  CUDA_VISIBLE_DEVICES: "0" # Use first GPU by default
+  PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:128" # Optimize memory allocation
