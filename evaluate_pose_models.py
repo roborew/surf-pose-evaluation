@@ -96,6 +96,9 @@ class PoseEvaluator:
         self.mlflow_manager = MLflowManager()
         self.visualizer = VisualizationUtils()
 
+        # Setup MLflow configuration
+        self._setup_mlflow()
+
         # Initialize video visualizer with encoding configuration
         encoding_config = (
             self.config.get("output", {}).get("visualization", {}).get("encoding", {})
@@ -130,6 +133,33 @@ class PoseEvaluator:
 
         # Setup logging
         self._setup_logging()
+
+    def _setup_mlflow(self):
+        """Setup MLflow tracking configuration"""
+        mlflow_config = self.config.get("mlflow", {})
+        
+        if mlflow_config.get("enabled", False):
+            # Set tracking URI
+            tracking_uri = mlflow_config.get("tracking_uri", "./mlruns")
+            mlflow.set_tracking_uri(tracking_uri)
+            logging.info(f"MLflow tracking URI set to: {tracking_uri}")
+            
+            # Set experiment name
+            experiment_name = mlflow_config.get("experiment_name", "default_experiment")
+            try:
+                mlflow.set_experiment(experiment_name)
+                logging.info(f"MLflow experiment set to: {experiment_name}")
+            except Exception as e:
+                logging.warning(f"Failed to set MLflow experiment '{experiment_name}': {e}")
+                # Create experiment if it doesn't exist
+                try:
+                    mlflow.create_experiment(experiment_name)
+                    mlflow.set_experiment(experiment_name)
+                    logging.info(f"Created and set MLflow experiment: {experiment_name}")
+                except Exception as e2:
+                    logging.error(f"Failed to create MLflow experiment '{experiment_name}': {e2}")
+        else:
+            logging.info("MLflow tracking disabled in configuration")
 
     def _load_config(self, config_path: str) -> Dict:
         """Load configuration from YAML file"""
