@@ -41,7 +41,7 @@ Create and activate the conda environment:
 conda env create -f environment_macos.yml
 conda activate surf_pose_eval
 
-# For Linux/Windows
+# For Linux/Windows (NVIDIA GPU systems)
 conda env create -f environment.yml
 conda activate surf_pose_eval
 ```
