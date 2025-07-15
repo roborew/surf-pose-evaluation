@@ -11,6 +11,7 @@ import subprocess
 import json
 import yaml
 from pathlib import Path
+import time
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent))
@@ -405,6 +406,9 @@ def generate_summary_report(run_manager: RunManager, models: list):
 
 def main():
     """Main production evaluation workflow"""
+    # Record start time for total execution tracking
+    start_time = time.time()
+
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
@@ -459,6 +463,23 @@ def main():
             logger.info("⏭️ Skipping comparison phase")
             results["comparison_phase"] = "skipped"
 
+        # Calculate total execution time
+        total_time = time.time() - start_time
+        hours = int(total_time // 3600)
+        minutes = int((total_time % 3600) // 60)
+        seconds = int(total_time % 60)
+
+        # Add timing info to results
+        results["total_execution_time"] = {
+            "seconds": total_time,
+            "formatted": f"{hours:02d}:{minutes:02d}:{seconds:02d}",
+            "human_readable": (
+                f"{hours}h {minutes}m {seconds}s"
+                if hours > 0
+                else f"{minutes}m {seconds}s"
+            ),
+        }
+
         # Create run summary
         run_manager.create_run_summary(results)
 
@@ -475,6 +496,9 @@ def main():
             print(f"   Optuna Phase: {results['optuna_phase']}")
             print(f"   Comparison Phase: {results['comparison_phase']}")
             print(f"   Configs Used: {len(results['configs_used'])}")
+            print(
+                f"   ⏱️ Total Execution Time: {results['total_execution_time']['human_readable']}"
+            )
 
             print(f"\n🔍 View Results:")
             print(
@@ -489,10 +513,30 @@ def main():
             print(f"\n🌐 Shared MLflow Access:")
             print(f"   All Experiments: mlflow ui --backend-store-uri {shared_uri}")
 
-            logger.info("🎯 Production evaluation completed successfully!")
+            logger.info(
+                f"🎯 Production evaluation completed successfully in {results['total_execution_time']['human_readable']}!"
+            )
 
     except Exception as e:
-        logger.error(f"❌ Production evaluation failed: {e}")
+        # Calculate total time even on failure
+        total_time = time.time() - start_time
+        hours = int(total_time // 3600)
+        minutes = int((total_time % 3600) // 60)
+        seconds = int(total_time % 60)
+
+        results["total_execution_time"] = {
+            "seconds": total_time,
+            "formatted": f"{hours:02d}:{minutes:02d}:{seconds:02d}",
+            "human_readable": (
+                f"{hours}h {minutes}m {seconds}s"
+                if hours > 0
+                else f"{minutes}m {seconds}s"
+            ),
+        }
+
+        logger.error(
+            f"❌ Production evaluation failed after {results['total_execution_time']['human_readable']}: {e}"
+        )
         results["error"] = str(e)
         run_manager.create_run_summary(results)
         success = False

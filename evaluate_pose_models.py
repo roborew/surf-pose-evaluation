@@ -116,6 +116,7 @@ class PoseEvaluator:
             else:
                 # Default to a timestamped predictions directory in the data hierarchy
                 import datetime
+
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 prediction_base_path = prediction_config.get(
                     "base_path",
@@ -137,27 +138,33 @@ class PoseEvaluator:
     def _setup_mlflow(self):
         """Setup MLflow tracking configuration"""
         mlflow_config = self.config.get("mlflow", {})
-        
+
         if mlflow_config.get("enabled", False):
             # Set tracking URI
             tracking_uri = mlflow_config.get("tracking_uri", "./mlruns")
             mlflow.set_tracking_uri(tracking_uri)
             logging.info(f"MLflow tracking URI set to: {tracking_uri}")
-            
+
             # Set experiment name
             experiment_name = mlflow_config.get("experiment_name", "default_experiment")
             try:
                 mlflow.set_experiment(experiment_name)
                 logging.info(f"MLflow experiment set to: {experiment_name}")
             except Exception as e:
-                logging.warning(f"Failed to set MLflow experiment '{experiment_name}': {e}")
+                logging.warning(
+                    f"Failed to set MLflow experiment '{experiment_name}': {e}"
+                )
                 # Create experiment if it doesn't exist
                 try:
                     mlflow.create_experiment(experiment_name)
                     mlflow.set_experiment(experiment_name)
-                    logging.info(f"Created and set MLflow experiment: {experiment_name}")
+                    logging.info(
+                        f"Created and set MLflow experiment: {experiment_name}"
+                    )
                 except Exception as e2:
-                    logging.error(f"Failed to create MLflow experiment '{experiment_name}': {e2}")
+                    logging.error(
+                        f"Failed to create MLflow experiment '{experiment_name}': {e2}"
+                    )
         else:
             logging.info("MLflow tracking disabled in configuration")
 
@@ -782,7 +789,9 @@ INTERPRETATION:
                 try:
                     model = model_class(device=self.device, **config)
                 except Exception as e:
-                    logging.warning(f"Failed to initialize {model_name} with config {config}: {e}")
+                    logging.warning(
+                        f"Failed to initialize {model_name} with config {config}: {e}"
+                    )
                     print(f"   • Trial failed - model initialization error: {e}")
                     # Return 0 score for failed initialization
                     mlflow.log_metric("optuna_trial_score", 0.0)
@@ -1583,6 +1592,9 @@ USAGE RECOMMENDATIONS:
 
 
 def main():
+    # Record start time for total execution tracking
+    start_time = time.time()
+
     parser = argparse.ArgumentParser(
         description="Evaluate pose estimation models for surfing analysis"
     )
@@ -1649,14 +1661,33 @@ def main():
     # Save results
     evaluator.save_results(results, args.output)
 
+    # Calculate total execution time
+    total_time = time.time() - start_time
+    hours = int(total_time // 3600)
+    minutes = int((total_time % 3600) // 60)
+    seconds = int(total_time % 60)
+
+    time_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    time_human = (
+        f"{hours}h {minutes}m {seconds}s" if hours > 0 else f"{minutes}m {seconds}s"
+    )
+
     # Print summary
-    print("\nEvaluation Summary:")
+    print("\n" + "=" * 60)
+    print("🎉 EVALUATION COMPLETED")
+    print("=" * 60)
+    print(f"⏱️ Total Execution Time: {time_human}")
+    print(f"\nEvaluation Summary:")
     for model_name, metrics in results.items():
         if isinstance(metrics, dict):
             print(f"\n{model_name}:")
             for metric, value in metrics.items():
                 if isinstance(value, (int, float)):
                     print(f"  {metric}: {value:.4f}")
+
+    print(f"\n📁 Results saved to: {args.output}")
+    print(f"🕐 Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logging.info(f"🎯 Evaluation completed successfully in {time_human}!")
 
 
 if __name__ == "__main__":
