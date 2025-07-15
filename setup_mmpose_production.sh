@@ -15,7 +15,7 @@ if conda list -n mmpose_cache mmpose 2>/dev/null | grep -q mmpose; then
     exit 0
 fi
 
-# Create a temporary build environment (using exact versions like macOS)
+# Create a temporary build environment (based on working SurfAnalysis setup)
 echo "📦 Creating temporary build environment..."
 cat > temp_build_env.yml << 'EOF'
 name: mmpose_cache
@@ -35,20 +35,37 @@ dependencies:
   - pytorch-cuda=12.1
   - numpy
   - scipy
+  - gcc
+  - gxx
   - pip:
       - fsspec
+      - opencv-python
+      - pillow
+      - pyyaml
 EOF
 
 conda env create -f temp_build_env.yml
 conda activate mmpose_cache
 
-# Install OpenMMLab packages using exact versions (like macOS setup)
-echo "🔧 Installing OpenMMLab ecosystem with exact versions..."
+# Install OpenMMLab packages using working SurfAnalysis approach
+echo "🔧 Installing OpenMMLab ecosystem (SurfAnalysis method)..."
+
+# Install PyTorch first (conda should handle this, but ensure it's right)
+conda install pytorch torchvision -c pytorch -y
+
+# Install base packages
 pip install fsspec
 pip install -U openmim
-mim install mmengine==0.8.4
-mim install mmcv==2.0.1
-mim install mmdet==3.1.0
+
+# Install MM packages with ranges like working setup
+echo "Installing mmengine..."
+mim install mmengine
+
+echo "Installing mmcv (using version range like working setup)..."
+mim install "mmcv>=2.0.0rc4,<2.2.0"
+
+echo "Installing mmdet..."
+mim install "mmdet>=3.0.0,<3.3.0"
 
 # Store the current directory location
 ORIGINAL_DIR=$(pwd)
