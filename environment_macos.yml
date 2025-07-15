@@ -54,6 +54,13 @@ dependencies:
       - rich==13.4.2
       - pillow==10.0.0
 
+      # OpenMMLab MMPose (compiled and cached)
+      - openmim>=0.3.7
+      - mmengine==0.8.4
+      - mmcv==2.0.1
+      - mmdet==3.1.0
+      - mmpose==1.1.0
+
     # MMPose can be installed later if needed
     # Note: Some MMPose components may have limited Apple Silicon support
 

@@ -25,7 +25,7 @@ class MMPoseWrapper(BasePoseModel):
 
         Args:
             device: Compute device ('cpu', 'cuda', 'mps')
-            **kwargs: Model configuration (mostly ignored, use simple defaults)
+            **kwargs: Model configuration
         """
         if not MMPOSE_AVAILABLE:
             raise ImportError(
@@ -34,15 +34,22 @@ class MMPoseWrapper(BasePoseModel):
 
         super().__init__(device, **kwargs)
 
-        # Simple configuration - use exactly what works
+        # Configuration
         self.kpt_thr = kwargs.get("kpt_thr", 0.3)
         self.bbox_thr = kwargs.get("bbox_thr", 0.3)
 
-        # CUDA-first: Use CUDA on Linux, fallback for macOS
+        # Smart device selection with MPS override
+        self.requested_device = device
         if device == "cuda":
             self.mmpose_device = "cuda"  # Use CUDA when available
         elif device == "mps":
-            self.mmpose_device = "cpu"  # MPS not well supported, use CPU on macOS
+            # MMPose/MMDetection NMS operations don't support MPS yet
+            # Fall back to CPU while logging the override
+            self.mmpose_device = "cpu"
+            print(
+                "⚠️  MMPose: MPS requested but not supported (NMS operations incompatible)"
+            )
+            print("   → Using CPU instead. Other models will still use MPS.")
         else:
             self.mmpose_device = "cpu"
 

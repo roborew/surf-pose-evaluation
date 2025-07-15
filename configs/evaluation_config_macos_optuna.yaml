@@ -1,13 +1,35 @@
 # macOS Optuna Optimization Configuration
 # Note: Output paths (mlflow, predictions, visualizations, best_params) are automatically
-# managed by RunManager when using run_production_evaluation.py. They are organized in
+# managed by RunManager when using run_evaluation.py. They are organized in
 # timestamped folders under results/runs/{timestamp}_{name}/.
 
-# Source Data Configuration
-source_data:
-  footage_path: "./data/SD_02_SURF_FOOTAGE_PREPT/04_SYNC_FOOTAGE_CLIPPED/"
-  camera_names: ["SONY_300"] # Focus on SONY_300 for better quality footage
-  max_clips_per_session: 10
+# Data Source Configuration - Corrected paths for actual data structure
+data_source:
+  base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
+  video_clips:
+    h264_path: "03_CLIPPED/h264"
+    ffv1_path: "03_CLIPPED/ffv1"
+    input_format: "h264" # Use h264 for macOS compatibility
+  annotations:
+    labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
+    maneuver_annotations_file: "maneuver_annotations.json"
+    sony_300_labels: "sony_300"
+    sony_70_labels: "sony_70"
+  splits:
+    train_file: "05_ANALYSED_DATA/POSE/splits/train_split.json"
+    val_file: "05_ANALYSED_DATA/POSE/splits/val_split.json"
+    test_file: "05_ANALYSED_DATA/POSE/splits/test_split.json"
+    train_ratio: 0.70
+    val_ratio: 0.15
+    test_ratio: 0.15
+    random_seed: 42
+    zoom_handling:
+      enabled: true
+      balanced_distribution: true
+      force_no_zoom_in_val: true
+  camera_selection:
+    enabled_cameras: ["SONY_300"] # Focus on SONY_300 for better quality footage
+    max_clips_per_session: 10
 
 # Model Configuration
 models:
@@ -37,7 +59,7 @@ evaluation:
 optuna:
   enabled: true
   study_name: "surf_pose_macos_optimization"
-  direction: "minimize"
+  direction: "maximize"
   n_trials: 20 # Reduced for macOS testing
   timeout: 7200 # 2 hours max
   sampler: "TPESampler"

@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
 """
-Production Evaluation Runner with Organized Run Management
+Surfing Pose Estimation Evaluation Framework
+Main evaluation script with organized run management
 Runs Optuna optimization followed by comprehensive comparison
 """
 
 import argparse
 import logging
 import sys
-import subprocess
 import json
 import yaml
 from pathlib import Path
 import time
+from typing import Dict
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent))
 
 from utils.run_manager import RunManager
+from utils.pose_evaluator import PoseEvaluator
+from utils.optuna_optimizer import OptunaPoseOptimizer
 
 
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description="Run production evaluation with organized run management"
+        description="Run pose estimation evaluation with organized run management"
     )
 
     # Run organization arguments
@@ -78,250 +81,79 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def run_optuna_phase(run_manager: RunManager, args) -> str:
+def run_optuna_phase(run_manager: RunManager, args) -> Dict:
     """Run Optuna optimization phase"""
     logger = logging.getLogger(__name__)
 
     logger.info("🔍 Starting Optuna optimization phase...")
 
     # Create Optuna-specific config
-    optuna_config = run_manager.create_config_for_phase(
+    optuna_config_path = run_manager.create_config_for_phase(
         "optuna", args.config, args.max_clips
     )
 
-    # Build command
-    cmd = [
-        "python",
-        "evaluate_pose_models.py",
-        "--config",
-        optuna_config,
-        "--use-optuna",
-        "--models",
-    ] + args.models
+    # Load config
+    with open(optuna_config_path, "r") as f:
+        config = yaml.safe_load(f)
 
-    if args.max_clips:
-        cmd.extend(["--max-clips", str(args.max_clips)])
+    # Initialize optimizer
+    optimizer = OptunaPoseOptimizer(config, run_manager)
 
-    logger.info(f"Running command: {' '.join(cmd)}")
+    # Load dataset
+    evaluator = PoseEvaluator(config)
+    maneuvers = evaluator.data_loader.load_maneuvers(
+        max_clips=args.max_clips,
+        video_format=config["data_source"]["video_clips"].get("input_format", "h264"),
+    )
 
-    try:
-        # Run with real-time output streaming
-        result = subprocess.run(cmd, check=True, text=True)
-        logger.info("✅ Optuna optimization completed successfully")
-        return optuna_config
-    except subprocess.CalledProcessError as e:
-        logger.error(f"❌ Optuna optimization failed with exit code: {e.returncode}")
-        raise
+    logger.info(f"Loaded {len(maneuvers)} maneuvers for optimization")
 
+    # Run optimization for each model
+    results = {}
+    for model_name in args.models:
+        if model_name not in evaluator.get_available_models():
+            logger.warning(f"Model {model_name} not available, skipping")
+            continue
 
-def extract_best_parameters(run_manager: RunManager, models: list):
-    """Extract best parameters from Optuna MLflow runs"""
-    logger = logging.getLogger(__name__)
-    logger.info("📊 Extracting best parameters from Optuna results")
+        logger.info(f"Optimizing {model_name}")
+        model_result = optimizer.optimize_model(model_name, maneuvers)
+        results[model_name] = model_result
 
-    try:
-        import mlflow
-        import os
+    # Save best parameters
+    optimizer.save_best_parameters(results)
 
-        # Connect to MLflow
-        mlflow_dir = run_manager.mlflow_dir
-        tracking_uri = str(mlflow_dir)
-        logger.info(f"🔗 Setting MLflow tracking URI: {tracking_uri}")
-        mlflow.set_tracking_uri(tracking_uri)
-
-        # Check if MLflow directory exists and has content
-        if not mlflow_dir.exists():
-            logger.error(f"❌ MLflow directory does not exist: {mlflow_dir}")
-            return False
-
-        # List contents of MLflow directory for debugging
-        try:
-            mlflow_contents = list(mlflow_dir.iterdir())
-            logger.info(
-                f"📁 MLflow directory contents: {[item.name for item in mlflow_contents]}"
-            )
-        except Exception as e:
-            logger.error(f"❌ Could not list MLflow directory contents: {e}")
-
-        # Get the Optuna experiment with timestamp suffix
-        experiment_name = f"surf_pose_production_optuna_{run_manager.timestamp}"
-        logger.info(f"🔍 Looking for experiment: {experiment_name}")
-
-        experiment = mlflow.get_experiment_by_name(experiment_name)
-        if not experiment:
-            logger.error(f"❌ Optuna experiment not found: {experiment_name}")
-
-            # Try to list available experiments for debugging
-            try:
-                all_experiments = mlflow.search_experiments()
-                experiment_names = [exp.name for exp in all_experiments]
-                logger.info(
-                    f"📋 Available experiments ({len(experiment_names)}): {experiment_names}"
-                )
-
-                # Try to find any experiment with "optuna" in the name
-                optuna_experiments = [
-                    name for name in experiment_names if "optuna" in name.lower()
-                ]
-                if optuna_experiments:
-                    logger.info(
-                        f"🔍 Found Optuna-related experiments: {optuna_experiments}"
-                    )
-
-                    # Try using the most recent Optuna experiment
-                    if len(optuna_experiments) == 1:
-                        logger.info(
-                            f"🔄 Attempting to use found Optuna experiment: {optuna_experiments[0]}"
-                        )
-                        experiment = mlflow.get_experiment_by_name(
-                            optuna_experiments[0]
-                        )
-                        if experiment:
-                            logger.info(
-                                f"✅ Successfully found alternative experiment: {optuna_experiments[0]}"
-                            )
-                else:
-                    logger.warning("⚠️ No Optuna-related experiments found")
-
-            except Exception as e:
-                logger.error(f"❌ Could not list experiments: {e}")
-
-            if not experiment:
-                return False
-
-        logger.info(
-            f"✅ Found experiment: {experiment.name} (ID: {experiment.experiment_id})"
-        )
-
-        best_params = {}
-
-        # For each model, find the best_full_eval run
-        for model in models:
-            logger.info(f"🔍 Searching for best parameters for model: {model}")
-
-            try:
-                runs = mlflow.search_runs(
-                    experiment_ids=[experiment.experiment_id],
-                    filter_string=f"tags.mlflow.runName LIKE '{model}_optuna_best_full_eval'",
-                    max_results=1,
-                )
-
-                if runs.empty:
-                    logger.warning(f"⚠️ No best full eval run found for {model}")
-
-                    # Try alternative search patterns
-                    alternative_patterns = [
-                        f"run_name LIKE '{model}_optuna_best%'",
-                        f"tags.mlflow.runName LIKE '{model}_best%'",
-                        f"params.model_name = '{model}' AND tags.mlflow.runName LIKE '%best%'",
-                    ]
-
-                    for pattern in alternative_patterns:
-                        try:
-                            runs = mlflow.search_runs(
-                                experiment_ids=[experiment.experiment_id],
-                                filter_string=pattern,
-                                max_results=1,
-                            )
-                            if not runs.empty:
-                                logger.info(
-                                    f"✅ Found run using alternative pattern: {pattern}"
-                                )
-                                break
-                        except Exception as e:
-                            logger.debug(f"Alternative pattern failed: {pattern} - {e}")
-
-                    if runs.empty:
-                        logger.warning(f"⚠️ No runs found for {model} with any pattern")
-                        continue
-
-                run = runs.iloc[0]
-                model_params = {}
-
-                # Extract parameters (filter out non-hyperparameters)
-                params_dict = run.params if hasattr(run, "params") else {}
-                if hasattr(params_dict, "items"):
-                    for param_name, param_value in params_dict.items():
-                        if not param_name.startswith(
-                            ("model_name", "optimization_mode", "data_scope", "purpose")
-                        ):
-                            model_params[param_name] = param_value
-                else:
-                    # If params is a Series, convert to dict
-                    params_dict = (
-                        run.params.to_dict() if hasattr(run.params, "to_dict") else {}
-                    )
-                    for param_name, param_value in params_dict.items():
-                        if not param_name.startswith(
-                            ("model_name", "optimization_mode", "data_scope", "purpose")
-                        ):
-                            model_params[param_name] = param_value
-
-                best_params[model] = model_params
-                logger.info(f"✅ Extracted best parameters for {model}: {model_params}")
-
-            except Exception as e:
-                logger.error(f"❌ Failed to extract parameters for {model}: {e}")
-                continue
-
-        if not best_params:
-            logger.error("❌ No best parameters found for any model")
-            return False
-
-        # Save best parameters
-        best_params_file = run_manager.best_params_dir / "best_parameters.yaml"
-        with open(best_params_file, "w") as f:
-            yaml.dump(best_params, f, default_flow_style=False)
-
-        logger.info(f"💾 Best parameters saved to {best_params_file}")
-        logger.info(
-            f"📊 Successfully extracted parameters for {len(best_params)} models: {list(best_params.keys())}"
-        )
-        return True
-
-    except Exception as e:
-        logger.error(f"❌ Failed to extract best parameters: {e}")
-        import traceback
-
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-        return False
+    logger.info("✅ Optuna optimization completed successfully")
+    return {"config_path": optuna_config_path, "results": results}
 
 
-def run_comparison_phase(run_manager: RunManager, args) -> str:
+# The extract_best_parameters function has been moved to OptunaPoseOptimizer class
+
+
+def run_comparison_phase(run_manager: RunManager, args) -> Dict:
     """Run comprehensive comparison phase"""
     logger = logging.getLogger(__name__)
 
     logger.info("📊 Starting comprehensive comparison phase...")
 
     # Create comparison-specific config
-    comparison_config = run_manager.create_config_for_phase(
+    comparison_config_path = run_manager.create_config_for_phase(
         "comparison",
         args.comparison_config,
         args.max_clips,
     )
 
-    # Build command
-    cmd = [
-        "python",
-        "evaluate_pose_models.py",
-        "--config",
-        comparison_config,
-        "--models",
-    ] + args.models
+    # Load config
+    with open(comparison_config_path, "r") as f:
+        config = yaml.safe_load(f)
 
-    if args.max_clips:
-        cmd.extend(["--max-clips", str(args.max_clips)])
+    # Initialize evaluator
+    evaluator = PoseEvaluator(config)
 
-    logger.info(f"Running command: {' '.join(cmd)}")
+    # Run evaluation for each model
+    results = evaluator.evaluate_models(args.models, max_clips=args.max_clips)
 
-    try:
-        # Run with real-time output streaming
-        result = subprocess.run(cmd, check=True, text=True)
-        logger.info("✅ Comprehensive comparison completed successfully")
-        return comparison_config
-    except subprocess.CalledProcessError as e:
-        logger.error(f"❌ Model comparison failed with exit code: {e.returncode}")
-        raise
+    logger.info("✅ Comprehensive comparison completed successfully")
+    return {"config_path": comparison_config_path, "results": results}
 
 
 def generate_summary_report(run_manager: RunManager, models: list):
@@ -443,23 +275,20 @@ def main():
     try:
         # Phase 1: Optuna Optimization
         if not args.skip_optuna and not args.comparison_only:
-            optuna_config = run_optuna_phase(run_manager, args)
+            optuna_result = run_optuna_phase(run_manager, args)
             results["optuna_phase"] = "completed"
-            results["configs_used"].append(optuna_config)
-
-            # Extract best parameters
-            if not extract_best_parameters(run_manager, args.models):
-                logger.error("❌ Failed at parameter extraction phase")
-                success = False
+            results["configs_used"].append(optuna_result["config_path"])
+            results["optuna_results"] = optuna_result["results"]
         else:
             logger.info("⏭️ Skipping Optuna optimization phase")
             results["optuna_phase"] = "skipped"
 
         # Phase 2: Comprehensive Comparison
-        if not args.skip_comparison and not args.optuna_only and success:
-            comparison_config = run_comparison_phase(run_manager, args)
+        if not args.skip_comparison and not args.optuna_only:
+            comparison_result = run_comparison_phase(run_manager, args)
             results["comparison_phase"] = "completed"
-            results["configs_used"].append(comparison_config)
+            results["configs_used"].append(comparison_result["config_path"])
+            results["comparison_results"] = comparison_result["results"]
 
             # Generate summary report
             if not generate_summary_report(run_manager, args.models):

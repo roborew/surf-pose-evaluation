@@ -4,7 +4,7 @@
 # timestamped folders under results/runs/{timestamp}_{name}/.
 
 # Source Data Configuration
-source_data:
+data_source:
   footage_path: "./data/SD_02_SURF_FOOTAGE_PREPT/04_SYNC_FOOTAGE_CLIPPED/"
   camera_names: ["SONY_300", "SONY_70"] # Production uses both cameras
   max_clips_per_session: 50 # Reasonable subset for optimization speed
