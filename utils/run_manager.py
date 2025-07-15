@@ -172,33 +172,24 @@ class RunManager:
         with open(base_config_path, "r") as f:
             config = yaml.safe_load(f)
 
-        # Translate simplified 'source_data' section to legacy 'data_source' section for backward compatibility
-        if "source_data" in config and "data_source" not in config:
-            source_data_config = config["source_data"]
-            config["data_source"] = {
-                "base_data_path": "./data/SD_02_SURF_FOOTAGE_PREPT",
-                "video_clips": {
-                    "h264_path": "03_CLIPPED/h264",
-                    "ffv1_path": "03_CLIPPED/ffv1",
-                    "input_format": "h264",  # Default to h264 for macOS
-                },
-                "annotations": {
-                    "labels_path": "04_ANNOTATED/surf-manoeuvre-labels",
-                    "sony_300_labels": "sony_300",
-                    "sony_70_labels": "sony_70",
-                },
-                "camera_selection": {
-                    "enabled_cameras": source_data_config.get(
-                        "camera_names", ["SONY_300"]
-                    )
-                },
-                "splits": {
-                    "train_ratio": 0.70,
-                    "val_ratio": 0.15,
-                    "test_ratio": 0.15,
-                    "random_seed": 42,
-                },
-            }
+        # Config already has proper data_source structure - no translation needed
+
+        # Ensure video format stays consistent with source config
+        if "data_source" in config and "video_clips" in config["data_source"]:
+            # Preserve the original input_format from source config
+            original_format = config["data_source"]["video_clips"].get(
+                "input_format", "h264"
+            )
+            # Force string type to prevent YAML conversion issues
+            config["data_source"]["video_clips"]["input_format"] = str(original_format)
+
+            # Debug logging to track format preservation
+            logger.info(f"🎥 Preserving video format: {original_format}")
+
+            # Explicit check for macOS configs to force h264
+            if "macos" in base_config_path.lower() and original_format != "h264":
+                logger.warning(f"⚠️ macOS config had {original_format}, forcing h264")
+                config["data_source"]["video_clips"]["input_format"] = "h264"
 
         # Update with run-specific settings
         config["mlflow"] = self.get_mlflow_config(

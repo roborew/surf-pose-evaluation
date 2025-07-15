@@ -146,6 +146,14 @@ def run_comparison_phase(run_manager: RunManager, args) -> Dict:
     with open(comparison_config_path, "r") as f:
         config = yaml.safe_load(f)
 
+    # Force h264 for macOS comparison (override any config issues)
+    video_format_override = (
+        "h264" if "macos" in comparison_config_path.lower() else None
+    )
+    if video_format_override:
+        # Fix config before initializing evaluator
+        config["data_source"]["video_clips"]["input_format"] = video_format_override
+
     # Initialize evaluator
     evaluator = PoseEvaluator(config)
 
