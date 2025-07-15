@@ -238,7 +238,7 @@ class PoseEvaluator:
         """Get video format to use, with command-line override support"""
         if self.video_format_override:
             return self.video_format_override
-        return self.config["dataset"]["video_clips"].get("input_format", "h264")
+        return self.config["data_source"]["video_clips"].get("input_format", "h264")
 
     def quick_screening(self, models: List[str], num_clips: int = 50) -> Dict:
         """Quick screening evaluation with limited data"""

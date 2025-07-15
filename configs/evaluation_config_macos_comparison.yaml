@@ -1,0 +1,72 @@
+# macOS Model Comparison Configuration
+# Note: Output paths (mlflow, predictions, visualizations, best_params) are automatically
+# managed by RunManager when using run_production_evaluation.py. They are organized in
+# timestamped folders under results/runs/{timestamp}_{name}/.
+
+# Source Data Configuration
+source_data:
+  footage_path: "./data/SD_02_SURF_FOOTAGE_PREPT/04_SYNC_FOOTAGE_CLIPPED/"
+  camera_names: ["SONY_300"] # Focus on SONY_300 for better quality footage
+  max_clips_per_session: 20
+
+# Model Configuration
+models:
+  mediapipe:
+    config_path: "configs/model_configs/mediapipe.yaml"
+  blazepose:
+    config_path: "configs/model_configs/blazepose.yaml"
+  yolov8_pose:
+    config_path: "configs/model_configs/yolov8_pose.yaml"
+  pytorch_pose:
+    config_path: "configs/model_configs/pytorch_pose.yaml"
+  mmpose:
+    config_path: "configs/model_configs/mmpose.yaml"
+
+# Evaluation Configuration
+evaluation:
+  quick_test:
+    enabled: false # Skip quick test in comparison phase
+  comprehensive_test:
+    enabled: true
+    num_clips: 20
+    models: ["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose", "mmpose"]
+    use_best_params: true # Use parameters from Optuna phase
+
+# Optuna Configuration
+optuna:
+  enabled: false # Disabled for comparison phase
+
+# Predictions Configuration
+predictions:
+  enabled: true
+  save_detailed_predictions: true
+  include_confidence_scores: true
+  include_bounding_boxes: true
+
+# Visualizations Configuration
+visualizations:
+  enabled: true
+  save_overlay_videos: true
+  save_keypoint_plots: true
+  save_comparison_plots: true
+  max_examples_per_model: 5 # Generate sample visualizations
+
+# Performance Configuration (macOS optimized)
+performance:
+  max_workers: 4 # Conservative for macOS
+  batch_size: 1
+  device: "mps" # Use Metal Performance Shaders on macOS
+  memory_limit_gb: 8
+  enable_gpu_memory_growth: true
+
+# Minimal configuration for direct usage with evaluate_pose_models.py
+# (RunManager will override these with proper paths when using run_production_evaluation.py)
+mlflow:
+  enabled: true
+  experiment_name: "surf_pose_macos_comparison"
+
+output:
+  predictions:
+    enabled: true
+  visualization:
+    enabled: true # Enable visualizations in comparison phase

@@ -172,12 +172,44 @@ class RunManager:
         with open(base_config_path, "r") as f:
             config = yaml.safe_load(f)
 
+        # Translate simplified 'source_data' section to legacy 'data_source' section for backward compatibility
+        if "source_data" in config and "data_source" not in config:
+            source_data_config = config["source_data"]
+            config["data_source"] = {
+                "base_data_path": "./data/SD_02_SURF_FOOTAGE_PREPT",
+                "video_clips": {
+                    "h264_path": "03_CLIPPED/h264",
+                    "ffv1_path": "03_CLIPPED/ffv1",
+                    "input_format": "h264",  # Default to h264 for macOS
+                },
+                "annotations": {
+                    "labels_path": "04_ANNOTATED/surf-manoeuvre-labels",
+                    "sony_300_labels": "sony_300",
+                    "sony_70_labels": "sony_70",
+                },
+                "camera_selection": {
+                    "enabled_cameras": source_data_config.get(
+                        "camera_names", ["SONY_300"]
+                    )
+                },
+                "splits": {
+                    "train_ratio": 0.70,
+                    "val_ratio": 0.15,
+                    "test_ratio": 0.15,
+                    "random_seed": 42,
+                },
+            }
+
         # Update with run-specific settings
         config["mlflow"] = self.get_mlflow_config(
             config.get("mlflow", {}).get("experiment_name", "surf_pose_evaluation")
         )
-        config["predictions"] = self.get_predictions_config()
-        config["visualizations"] = self.get_visualizations_config()
+
+        # Create output section with proper nesting for evaluate_pose_models.py compatibility
+        if "output" not in config:
+            config["output"] = {}
+        config["output"]["predictions"] = self.get_predictions_config()
+        config["output"]["visualization"] = self.get_visualizations_config()
         config["best_params"] = self.get_best_params_config()
 
         # Update max_clips if provided

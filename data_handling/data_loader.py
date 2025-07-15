@@ -160,15 +160,15 @@ class SurfingDataLoader:
             config: Configuration dictionary containing dataset paths and settings
         """
         self.config = config
-        self.dataset_config = config["dataset"]
-        self.base_path = Path(self.dataset_config["base_data_path"])
+        self.data_source_config = config["data_source"]
+        self.base_path = Path(self.data_source_config["base_data_path"])
 
         # Video and annotation paths
-        self.video_clips_config = self.dataset_config["video_clips"]
-        self.annotations_config = self.dataset_config["annotations"]
+        self.video_clips_config = self.data_source_config["video_clips"]
+        self.annotations_config = self.data_source_config["annotations"]
 
         # Data splits configuration
-        self.splits_config = self.dataset_config["splits"]
+        self.splits_config = self.data_source_config["splits"]
 
         # Zoom handling configuration
         self.zoom_config = self.splits_config.get(
@@ -181,7 +181,7 @@ class SurfingDataLoader:
         )
 
         # Camera selection configuration
-        self.camera_config = self.dataset_config.get("camera_selection", {})
+        self.camera_config = self.data_source_config.get("camera_selection", {})
         self.enabled_cameras = self.camera_config.get(
             "enabled_cameras", ["SONY_300", "SONY_70"]
         )
@@ -836,7 +836,7 @@ def main():
     """Example usage of the data loader."""
     # Example configuration
     config = {
-        "dataset": {
+        "data_source": {
             "base_data_path": "./data/SD_02_SURF_FOOTAGE_PREPT",
             "video_clips": {
                 "h264_path": "03_CLIPPED/h264",

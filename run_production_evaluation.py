@@ -49,7 +49,13 @@ def parse_arguments():
         "--config",
         type=str,
         default="configs/evaluation_config_production_optuna.yaml",
-        help="Base configuration file",
+        help="Base configuration file for Optuna phase",
+    )
+    parser.add_argument(
+        "--comparison-config",
+        type=str,
+        default="configs/evaluation_config_production_comparison.yaml",
+        help="Configuration file for comparison phase",
     )
     parser.add_argument(
         "--optuna-trials", type=int, help="Number of Optuna trials to run"
@@ -290,7 +296,7 @@ def run_comparison_phase(run_manager: RunManager, args) -> str:
     # Create comparison-specific config
     comparison_config = run_manager.create_config_for_phase(
         "comparison",
-        "configs/evaluation_config_production_comparison.yaml",
+        args.comparison_config,
         args.max_clips,
     )
 

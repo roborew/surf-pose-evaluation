@@ -63,7 +63,33 @@ Expected output:
 - **macOS with Apple Silicon**: `CUDA: False, MPS: True`
 - **CPU-only systems**: `CUDA: False, MPS: False`
 
-### 3. Data Setup
+### 3. YOLOv8 Weight Setup
+
+YOLOv8 models require pre-downloaded weights to avoid download issues during evaluation:
+
+```bash
+# Download all YOLOv8 pose models (recommended)
+python setup_yolo_downloadweights.py
+
+# Download specific models only
+python setup_yolo_downloadweights.py --models n,s
+
+# Check current weight status
+python setup_yolo_downloadweights.py --list
+
+# Force re-download (if corrupted)
+python setup_yolo_downloadweights.py --force
+```
+
+Available models:
+
+- **nano (n)**: 6.2 MB - Fastest inference
+- **small (s)**: 11.6 MB - Good balance
+- **medium (m)**: 26.4 MB - Higher accuracy
+- **large (l)**: 50.5 MB - Best accuracy
+- **extra-large (x)**: 90.7 MB - Highest accuracy
+
+### 4. Data Setup
 
 Ensure your data follows this structure:
 
@@ -344,7 +370,7 @@ ls -la data/SD_02_SURF_FOOTAGE_PREPT/03_CLIPPED/h264/
 # Check system status
 python -c "from utils.run_manager import RunManager; rm = RunManager(); rm.print_run_info()"
 
-# List all experiments  
+# List all experiments
 python utils/mlflow_utils.py --list
 
 # Check specific run

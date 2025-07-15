@@ -1,155 +1,110 @@
 # Production Optuna Hyperparameter Optimization Configuration
-# Phase 1: Find optimal hyperparameters for each model
+# Note: Output paths (mlflow, predictions, visualizations, best_params) are automatically
+# managed by RunManager when using run_production_evaluation.py. They are organized in
+# timestamped folders under results/runs/{timestamp}_{name}/.
 
-# Experiment metadata
-experiment:
-  name: "surf_pose_production_optuna"
-  description: "Hyperparameter optimization for pose estimation models"
-  version: "1.0"
-  author: "Production Team"
+# Source Data Configuration
+source_data:
+  footage_path: "./data/SD_02_SURF_FOOTAGE_PREPT/04_SYNC_FOOTAGE_CLIPPED/"
+  camera_names: ["SONY_300", "SONY_70"] # Production uses both cameras
+  max_clips_per_session: 50 # Reasonable subset for optimization speed
 
-# Dataset configuration
-dataset:
-  base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
-  video_clips:
-    h264_path: "03_CLIPPED/h264"
-    ffv1_path: "03_CLIPPED/ffv1"
-    input_format: "ffv1" # Production uses ffv1 format
-  annotations:
-    labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
-    sony_300_labels: "sony_300"
-    sony_70_labels: "sony_70"
-
-  # Camera selection for evaluation
-  camera_selection:
-    enabled_cameras: ["SONY_300", "SONY_70"] # Available: ["SONY_300", "SONY_70"]
-    # For development/testing, you can limit to specific cameras:
-    # enabled_cameras: ["SONY_70"]  # Only use SONY_70 for faster testing
-
-  splits:
-    train_ratio: 0.70
-    val_ratio: 0.15
-    test_ratio: 0.15
-    random_seed: 42
-
-# Model configuration
+# Model Configuration
 models:
-  enabled_models:
-    - "mediapipe"
-    - "blazepose"
-    - "yolov8_pose"
-    - "pytorch_pose"
-    - "mmpose"
-  default_settings:
-    confidence_threshold: 0.3
-    batch_size: 1
-    device: "auto" # Auto-detect: CUDA first, then MPS/CPU fallback
-    half_precision: true # Enable FP16 for RTX 4090 performance
+  mediapipe:
+    config_path: "configs/model_configs/mediapipe.yaml"
+  blazepose:
+    config_path: "configs/model_configs/blazepose.yaml"
+  yolov8_pose:
+    config_path: "configs/model_configs/yolov8_pose.yaml"
+  pytorch_pose:
+    config_path: "configs/model_configs/pytorch_pose.yaml"
+  mmpose:
+    config_path: "configs/model_configs/mmpose.yaml"
 
-# Evaluation configuration - SMALLER DATASET FOR OPTIMIZATION
+# Evaluation Configuration
 evaluation:
   quick_test:
+    enabled: true
     num_clips: 20
-    max_duration_seconds: 10
-    cameras: ["SONY_300", "SONY_70"] # Deprecated: Use dataset.camera_selection.enabled_cameras
+    models: ["yolov8_pose"] # Fast model for quick validation
   comprehensive_test:
+    enabled: true
     num_clips: 50 # Smaller for optimization speed
-    max_duration_seconds: 20
-    cameras: ["SONY_300", "SONY_70"] # Deprecated: Use dataset.camera_selection.enabled_cameras
-  metrics:
-    pose_accuracy:
-      - "pck_0.2" # Primary optimization metric
-    performance:
-      - "inference_latency_ms"
-      - "memory_usage_gb"
+    models: ["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose", "mmpose"]
 
-# MLflow configuration - SEPARATE EXPERIMENT
-mlflow:
-  enabled: true
-  experiment_name: "surf_pose_production_optuna" # Different experiment name
-  tracking_uri: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/mlruns"
-  logging:
-    parameters: true
-    metrics: true
-    artifacts: true
-    models: false
-    log_predictions: false # Skip predictions during optimization
-    log_visualizations: false # Skip visualizations during optimization
-    max_videos_per_run: 0
-  default_tags:
-    project: "surf_pose_evaluation"
-    stage: "hyperparameter_optimization"
-    dataset: "widemouth_march_2025"
-
-# Optuna configuration - FOCUSED ON OPTIMIZATION
+# Optuna Optimization
 optuna:
   enabled: true
   study_name: "surf_pose_optimization_production"
-  direction: "maximize"
-  n_trials: 100 # Increased for more thorough optimization
-  timeout_minutes: 300 # 5 hours for comprehensive search
+  direction: "maximize" # Maximize PCK accuracy
+  n_trials: 100 # Thorough optimization
+  timeout: 18000 # 5 hours max
+  sampler: "TPESampler"
+  pruner: "MedianPruner"
 
-  # Optimization target
-  objective:
-    primary_metric: "pck_0.2"
-    secondary_metrics: ["inference_latency_ms", "memory_usage_gb"]
-    weights: [0.8, 0.15, 0.05] # Prioritize accuracy for surf footage
+# Performance Configuration (Production optimized)
+performance:
+  max_workers: 8 # Full utilization for production
+  batch_size: 1
+  device: "auto" # Auto-detect: CUDA first, then MPS/CPU
+  memory_limit_gb: 32
+  enable_gpu_memory_growth: true
+  half_precision: true # Enable FP16 for RTX 4090
 
-  # Pruning for early stopping
-  pruning:
-    enabled: true
-    patience: 5 # More patience for complex search space
-    min_trials: 10 # More trials before pruning starts
+# Minimal configuration for direct usage with evaluate_pose_models.py
+# (RunManager will override these with proper paths when using run_production_evaluation.py)
+mlflow:
+  enabled: true
+  experiment_name: "surf_pose_production_optuna"
 
-# Hardware configuration
-hardware:
-  gpu:
-    device_id: 0
-    memory_fraction: 0.9
-    allow_growth: true
-  cpu:
-    num_workers: 8
-    num_threads: 16
-  memory:
-    max_memory_gb: 32
-    cache_enabled: true
-    clear_cache_frequency: 50
-
-# Output configuration - MINIMAL FOR OPTIMIZATION
 output:
-  results_dir: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results"
-
-  # Save optimal parameters for next phase
-  best_params:
-    enabled: true
-    save_path: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/best_params"
-    format: "yaml"
-
-  # Disable predictions during optimization for speed
   predictions:
-    enabled: false # Disable during optimization to save time and storage
-    base_path: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/production_optuna/predictions"
-
-  # Minimal visualization during optimization
+    enabled: false # Disabled during optimization for speed
   visualization:
-    enabled: false # Disable to speed up optimization
+    enabled: false # Disabled during optimization for speed
 
-  # No reports during optimization
-  reports:
-    generate_html_report: false
-    generate_pdf_summary: false
-
-# Logging configuration
-logging:
-  level: "INFO"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  save_to_file: true
-  log_file: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/optuna_optimization.log"
-
-# Development and debugging
-debug:
-  enabled: false
-  save_intermediate_results: false
-  profile_memory: false
-  profile_compute: false
-  verbose_errors: true
+# Reference configurations (commented out - handled by RunManager or rarely changed)
+#
+# experiment:
+#   name: "surf_pose_production_optuna"
+#   description: "Hyperparameter optimization for pose estimation models"
+#   version: "1.0"
+#   author: "Production Team"
+#
+# dataset:
+#   base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
+#   video_clips:
+#     input_format: "ffv1"  # Production uses ffv1 format
+#   annotations:
+#     labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
+#   splits:
+#     train_ratio: 0.70
+#     val_ratio: 0.15
+#     test_ratio: 0.15
+#     random_seed: 42
+#
+# hardware:
+#   gpu:
+#     device_id: 0
+#     memory_fraction: 0.9
+#     allow_growth: true
+#   cpu:
+#     num_workers: 8
+#     num_threads: 16
+#   memory:
+#     max_memory_gb: 32
+#     cache_enabled: true
+#     clear_cache_frequency: 50
+#
+# logging:
+#   level: "INFO"
+#   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+#   save_to_file: true
+#
+# debug:
+#   enabled: false
+#   save_intermediate_results: false
+#   profile_memory: false
+#   profile_compute: false
+#   verbose_errors: true

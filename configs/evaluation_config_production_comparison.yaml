@@ -1,169 +1,157 @@
 # Production Model Comparison Configuration
-# Phase 2: Compare models using optimal hyperparameters from Optuna
+# Note: Output paths (mlflow, predictions, visualizations, best_params) are automatically
+# managed by RunManager when using run_production_evaluation.py. They are organized in
+# timestamped folders under results/runs/{timestamp}_{name}/.
 
-# Experiment metadata
-experiment:
-  name: "surf_pose_production_comparison"
-  description: "Final model comparison using optimal hyperparameters on full dataset"
-  version: "1.0"
-  author: "Production Team"
+# Source Data Configuration
+source_data:
+  footage_path: "./data/SD_02_SURF_FOOTAGE_PREPT/04_SYNC_FOOTAGE_CLIPPED/"
+  camera_names: ["SONY_300", "SONY_70"] # Production uses both cameras
+  max_clips_per_session: 200 # Full dataset for comparison
 
-# Dataset configuration - FULL DATASET FOR COMPARISON
-dataset:
-  base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
-  video_clips:
-    h264_path: "03_CLIPPED/h264"
-    ffv1_path: "03_CLIPPED/ffv1"
-    input_format: "ffv1" # Production uses ffv1 format
-  annotations:
-    labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
-    sony_300_labels: "sony_300"
-    sony_70_labels: "sony_70"
-
-  # Camera selection for evaluation
-  camera_selection:
-    enabled_cameras: ["SONY_300", "SONY_70"] # Available: ["SONY_300", "SONY_70"]
-    # For development/testing, you can limit to specific cameras:
-    # enabled_cameras: ["SONY_70"]  # Only use SONY_70 for faster testing
-
-  splits:
-    train_ratio: 0.70
-    val_ratio: 0.15
-    test_ratio: 0.15
-    random_seed: 42 # SAME SEED ensures same data splits
-
-# Model configuration - USES BEST PARAMS FROM OPTUNA
+# Model Configuration
 models:
-  enabled_models:
-    - "mediapipe"
-    - "blazepose"
-    - "yolov8_pose"
-    - "pytorch_pose"
-    - "mmpose" # Add this
-  default_settings:
-    confidence_threshold: 0.3
-    batch_size: 1
-    device: "auto" # Auto-detect: CUDA first, then MPS/CPU fallback
-    half_precision: true # Enable FP16 for RTX 4090 performance
+  mediapipe:
+    config_path: "configs/model_configs/mediapipe.yaml"
+  blazepose:
+    config_path: "configs/model_configs/blazepose.yaml"
+  yolov8_pose:
+    config_path: "configs/model_configs/yolov8_pose.yaml"
+  pytorch_pose:
+    config_path: "configs/model_configs/pytorch_pose.yaml"
+  mmpose:
+    config_path: "configs/model_configs/mmpose.yaml"
 
-  # Load optimal parameters from Optuna phase
-  load_best_params:
-    enabled: true
-    source_path: "./results/best_params"
-    fallback_to_defaults: true
-
-# Evaluation configuration - FULL DATASET
+# Evaluation Configuration
 evaluation:
   quick_test:
+    enabled: true
     num_clips: 50
-    max_duration_seconds: 10
-    cameras: ["SONY_300", "SONY_70"]
+    models: ["mediapipe", "yolov8_pose"] # Quick validation with reliable models
   comprehensive_test:
+    enabled: true
     num_clips: 200 # Full dataset for comparison
-    max_duration_seconds: 30
-    cameras: ["SONY_300", "SONY_70"]
-  metrics:
-    pose_accuracy:
-      - "pck_0.1"
-      - "pck_0.2"
-      - "pck_0.3"
-      - "mpjpe"
-    performance:
-      - "inference_latency_ms"
-      - "memory_usage_gb"
-      - "throughput_fps"
-      - "model_size_mb"
+    models: ["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose", "mmpose"]
+    use_best_params: true # Use parameters from Optuna phase
 
-# MLflow configuration - SEPARATE EXPERIMENT
+# Optuna Configuration
+optuna:
+  enabled: false # Disabled for comparison phase
+
+# Predictions Configuration
+predictions:
+  enabled: true
+  save_detailed_predictions: true
+  include_confidence_scores: true
+  include_bounding_boxes: true
+
+# Visualizations Configuration
+visualizations:
+  enabled: true
+  save_overlay_videos: true
+  save_keypoint_plots: true
+  save_comparison_plots: true
+  max_examples_per_model: 10 # Generate comprehensive visualizations
+
+# Performance Configuration (Production optimized)
+performance:
+  max_workers: 8 # Full utilization for production
+  batch_size: 1
+  device: "auto" # Auto-detect: CUDA first, then MPS/CPU
+  memory_limit_gb: 32
+  enable_gpu_memory_growth: true
+  half_precision: true # Enable FP16 for RTX 4090
+
+# Minimal configuration for direct usage with evaluate_pose_models.py
+# (RunManager will override these with proper paths when using run_production_evaluation.py)
 mlflow:
   enabled: true
-  experiment_name: "surf_pose_production_comparison" # Different experiment name
-  tracking_uri: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/mlruns"
-  logging:
-    parameters: true
-    metrics: true
-    artifacts: true
-    models: false
-    log_predictions: true # Full predictions for comparison
-    log_visualizations: true # Full visualizations for comparison
-    max_videos_per_run: 5
-  default_tags:
-    project: "surf_pose_evaluation"
-    stage: "model_comparison"
-    dataset: "widemouth_march_2025"
-    uses_optimal_params: "true"
+  experiment_name: "surf_pose_production_comparison"
 
-# Optuna configuration - DISABLED FOR COMPARISON
-optuna:
-  enabled: false # No optimization in comparison phase
-
-# Hardware configuration
-hardware:
-  gpu:
-    device_id: 0
-    memory_fraction: 0.9
-    allow_growth: true
-  cpu:
-    num_workers: 8
-    num_threads: 16
-  memory:
-    max_memory_gb: 32
-    cache_enabled: true
-    clear_cache_frequency: 50
-
-# Output configuration - FULL PRODUCTION OUTPUT
 output:
-  results_dir: "./results"
-
-  # Full prediction storage
   predictions:
     enabled: true
-    base_path: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/production_comparison/predictions"
-    shared_storage_path: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/production_comparison/predictions"
-    format: "json"
-    include_metadata: true
-    compress: false
-
-  # Full visualization suite
   visualization:
     enabled: true
-    save_overlay_videos: true
-    save_keypoint_plots: true
-    save_comparison_plots: true
-    max_examples_per_model: 10
-
-    # Shared storage for production
-    shared_storage_path: "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/visualizations"
-
-    # High-quality video encoding for final results
-    encoding:
-      format: "h264"
-      quality:
-        crf: 23
-        preset: "fast"
-      pixel_format: "yuv420p"
-      audio:
-        enabled: true
-        codec: "copy"
-      container: "mp4"
-
-  # Full reporting
-  reports:
-    generate_html_report: true
-    generate_pdf_summary: true
-    include_failure_analysis: true
-
-# Logging configuration
-logging:
-  level: "INFO"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  save_to_file: true
-  log_file: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/model_comparison.log"
-
-# Development and debugging
-debug:
-  enabled: false
-  save_intermediate_results: false
-  profile_memory: true
-  profile_compute: true
-  verbose_errors: true
+# Reference configurations (commented out - handled by RunManager or rarely changed)
+#
+# experiment:
+#   name: "surf_pose_production_comparison"
+#   description: "Final model comparison using optimal hyperparameters on full dataset"
+#   version: "1.0"
+#   author: "Production Team"
+#
+# dataset:
+#   base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
+#   video_clips:
+#     input_format: "ffv1"  # Production uses ffv1 format
+#   annotations:
+#     labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
+#   splits:
+#     train_ratio: 0.70
+#     val_ratio: 0.15
+#     test_ratio: 0.15
+#     random_seed: 42
+#
+# models:
+#   load_best_params:
+#     enabled: true
+#     source_path: "./results/best_params"
+#     fallback_to_defaults: true
+#
+# evaluation:
+#   metrics:
+#     pose_accuracy:
+#       - "pck_0.1"
+#       - "pck_0.2"
+#       - "pck_0.3"
+#       - "mpjpe"
+#     performance:
+#       - "inference_latency_ms"
+#       - "memory_usage_gb"
+#       - "throughput_fps"
+#       - "model_size_mb"
+#
+# hardware:
+#   gpu:
+#     device_id: 0
+#     memory_fraction: 0.9
+#     allow_growth: true
+#   cpu:
+#     num_workers: 8
+#     num_threads: 16
+#   memory:
+#     max_memory_gb: 32
+#     cache_enabled: true
+#     clear_cache_frequency: 50
+#
+# output:
+#   # High-quality video encoding for final results
+#   visualization:
+#     encoding:
+#       format: "h264"
+#       quality:
+#         crf: 23
+#         preset: "fast"
+#       pixel_format: "yuv420p"
+#       audio:
+#         enabled: true
+#         codec: "copy"
+#       container: "mp4"
+#
+#   reports:
+#     generate_html_report: true
+#     generate_pdf_summary: true
+#     include_failure_analysis: true
+#
+# logging:
+#   level: "INFO"
+#   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+#   save_to_file: true
+#
+# debug:
+#   enabled: false
+#   save_intermediate_results: false
+#   profile_memory: true
+#   profile_compute: true
+#   verbose_errors: true

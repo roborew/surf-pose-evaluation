@@ -1,0 +1,64 @@
+# macOS Optuna Optimization Configuration
+# Note: Output paths (mlflow, predictions, visualizations, best_params) are automatically
+# managed by RunManager when using run_production_evaluation.py. They are organized in
+# timestamped folders under results/runs/{timestamp}_{name}/.
+
+# Source Data Configuration
+source_data:
+  footage_path: "./data/SD_02_SURF_FOOTAGE_PREPT/04_SYNC_FOOTAGE_CLIPPED/"
+  camera_names: ["SONY_300"] # Focus on SONY_300 for better quality footage
+  max_clips_per_session: 10
+
+# Model Configuration
+models:
+  mediapipe:
+    config_path: "configs/model_configs/mediapipe.yaml"
+  blazepose:
+    config_path: "configs/model_configs/blazepose.yaml"
+  yolov8_pose:
+    config_path: "configs/model_configs/yolov8_pose.yaml"
+  pytorch_pose:
+    config_path: "configs/model_configs/pytorch_pose.yaml"
+  mmpose:
+    config_path: "configs/model_configs/mmpose.yaml"
+
+# Evaluation Configuration
+evaluation:
+  quick_test:
+    enabled: true
+    num_clips: 3
+    models: ["yolov8_pose"] # Fast model for quick testing
+  comprehensive_test:
+    enabled: true
+    num_clips: 10
+    models: ["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose", "mmpose"]
+
+# Optuna Optimization
+optuna:
+  enabled: true
+  study_name: "surf_pose_macos_optimization"
+  direction: "minimize"
+  n_trials: 20 # Reduced for macOS testing
+  timeout: 7200 # 2 hours max
+  sampler: "TPESampler"
+  pruner: "MedianPruner"
+
+# Performance Configuration (macOS optimized)
+performance:
+  max_workers: 4 # Conservative for macOS
+  batch_size: 1
+  device: "mps" # Use Metal Performance Shaders on macOS
+  memory_limit_gb: 8
+  enable_gpu_memory_growth: true
+
+# Minimal configuration for direct usage with evaluate_pose_models.py
+# (RunManager will override these with proper paths when using run_production_evaluation.py)
+mlflow:
+  enabled: true
+  experiment_name: "surf_pose_macos_optuna"
+
+output:
+  predictions:
+    enabled: true
+  visualization:
+    enabled: false # Disabled during optimization for speed
