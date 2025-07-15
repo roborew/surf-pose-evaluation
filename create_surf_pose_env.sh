@@ -33,29 +33,18 @@ echo "Target environment: $TARGET_ENV_PATH"
 # Copy the installed packages from cache to target environment
 echo "📚 Installing cached OpenMMLab packages..."
 
-# Method 1: Use conda to clone specific packages
-conda activate mmpose_cache
-MMCV_VERSION=$(python -c "import mmcv; print(mmcv.__version__)" 2>/dev/null)
-MMENGINE_VERSION=$(python -c "import mmengine; print(mmengine.__version__)" 2>/dev/null)
-MMDET_VERSION=$(python -c "import mmdet; print(mmdet.__version__)" 2>/dev/null)
+# Install exact versions (like macOS setup) to ensure compatibility
+echo "Installing exact OpenMMLab versions for compatibility..."
 
-conda activate surf_pose_eval
+# Use exact versions that work together (same as macOS)
+echo "Installing mmengine==0.8.4"
+pip install mmengine==0.8.4
 
-# Install the exact versions found in cache
-if [ ! -z "$MMCV_VERSION" ]; then
-    echo "Installing mmcv==$MMCV_VERSION"
-    pip install mmcv==$MMCV_VERSION -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html
-fi
+echo "Installing mmcv==2.0.1"
+pip install mmcv==2.0.1 -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html
 
-if [ ! -z "$MMENGINE_VERSION" ]; then
-    echo "Installing mmengine==$MMENGINE_VERSION"
-    pip install mmengine==$MMENGINE_VERSION
-fi
-
-if [ ! -z "$MMDET_VERSION" ]; then
-    echo "Installing mmdet==$MMDET_VERSION"
-    pip install mmdet==$MMDET_VERSION
-fi
+echo "Installing mmdet==3.1.0"
+pip install mmdet==3.1.0
 
 # For MMPose, we need to copy the development installation
 echo "🏗️  Setting up MMPose development installation..."
