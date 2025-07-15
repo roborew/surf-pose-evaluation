@@ -52,18 +52,60 @@ class MMPoseWrapper(BasePoseModel):
     def load_model(self) -> None:
         """Load MMPose inferencer with CUDA-first approach"""
         try:
-            # Initialize with detected device (CUDA prioritized)
-            self.inferencer = MMPoseInferencer("human", device=self.mmpose_device)
+            # Try different initialization approaches for robustness
+            initialization_methods = [
+                # Method 1: Standard initialization
+                lambda: MMPoseInferencer("human", device=self.mmpose_device),
+                # Method 2: Explicit pose model without detection
+                lambda: MMPoseInferencer(
+                    pose2d="rtmpose-m_simcc-body7_pt-body7_420e-256x192",
+                    device=self.mmpose_device,
+                ),
+                # Method 3: Use CPU fallback if CUDA fails
+                lambda: (
+                    MMPoseInferencer("human", device="cpu")
+                    if self.mmpose_device == "cuda"
+                    else None
+                ),
+            ]
+
+            for i, init_method in enumerate(initialization_methods):
+                try:
+                    if init_method is not None:
+                        self.inferencer = init_method()
+                        self.is_initialized = True
+
+                        if self.mmpose_device == "cuda":
+                            print(
+                                f"MMPose initialized with CUDA acceleration on {self.mmpose_device} (method {i+1})"
+                            )
+                        else:
+                            print(
+                                f"MMPose initialized on {self.mmpose_device} (method {i+1})"
+                            )
+                        return
+
+                except Exception as method_error:
+                    print(f"MMPose initialization method {i+1} failed: {method_error}")
+                    continue
+
+            # If all methods failed, try the most basic approach
+            print(
+                "All standard initialization methods failed, trying basic approach..."
+            )
+            self.inferencer = MMPoseInferencer(
+                pose2d="rtmpose-m_simcc-body7_pt-body7_420e-256x192",
+                det_model=None,  # Skip detection model entirely
+                device="cpu",
+            )
             self.is_initialized = True
-            
-            if self.mmpose_device == "cuda":
-                print(f"MMPose initialized with CUDA acceleration on {self.mmpose_device}")
-            else:
-                print(f"MMPose initialized on {self.mmpose_device} (CPU fallback)")
-        
+            print("MMPose initialized with basic approach (CPU only, no detection)")
 
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize MMPose: {e}")
+            print(f"All MMPose initialization methods failed. Final error: {e}")
+            raise RuntimeError(
+                f"Failed to initialize MMPose after trying all methods: {e}"
+            )
 
     def predict(self, image: np.ndarray) -> Dict[str, Any]:
         """Run MMPose estimation on image
@@ -157,27 +199,38 @@ class MMPoseWrapper(BasePoseModel):
             elif isinstance(result, dict):
                 if "predictions" in result:
                     predictions = result["predictions"]
-                    print(f"Predictions type: {type(predictions)}, length: {len(predictions) if hasattr(predictions, '__len__') else 'N/A'}")
-                    
+                    print(
+                        f"Predictions type: {type(predictions)}, length: {len(predictions) if hasattr(predictions, '__len__') else 'N/A'}"
+                    )
+
                     if isinstance(predictions, list) and len(predictions) > 0:
                         # predictions is a list of results, take the first one
                         prediction = predictions[0]
                         print(f"First prediction type: {type(prediction)}")
-                        
+
                         if hasattr(prediction, "pred_instances"):
                             pred_instances = prediction.pred_instances
                             keypoints = pred_instances.keypoints.cpu().numpy()
-                            keypoint_scores = pred_instances.keypoint_scores.cpu().numpy()
+                            keypoint_scores = (
+                                pred_instances.keypoint_scores.cpu().numpy()
+                            )
                             if hasattr(pred_instances, "bboxes"):
                                 bboxes = pred_instances.bboxes.cpu().numpy()
                         elif isinstance(prediction, dict):
                             # Handle case where prediction itself is a dict
-                            print(f"Prediction dict keys: {list(prediction.keys()) if isinstance(prediction, dict) else 'Not a dict'}")
-                            if "keypoints" in prediction and "keypoint_scores" in prediction:
+                            print(
+                                f"Prediction dict keys: {list(prediction.keys()) if isinstance(prediction, dict) else 'Not a dict'}"
+                            )
+                            if (
+                                "keypoints" in prediction
+                                and "keypoint_scores" in prediction
+                            ):
                                 keypoints = prediction["keypoints"]
-                                keypoint_scores = prediction["keypoint_scores"] 
-                                bboxes = prediction.get("bboxes", np.array([]).reshape(0, 4))
-                                
+                                keypoint_scores = prediction["keypoint_scores"]
+                                bboxes = prediction.get(
+                                    "bboxes", np.array([]).reshape(0, 4)
+                                )
+
                                 # Convert to numpy if they're tensors
                                 if hasattr(keypoints, "cpu"):
                                     keypoints = keypoints.cpu().numpy()
@@ -185,19 +238,28 @@ class MMPoseWrapper(BasePoseModel):
                                     keypoint_scores = keypoint_scores.cpu().numpy()
                                 if hasattr(bboxes, "cpu"):
                                     bboxes = bboxes.cpu().numpy()
-                        elif isinstance(prediction, list) and len(prediction) > 0 and isinstance(prediction[0], dict):
+                        elif (
+                            isinstance(prediction, list)
+                            and len(prediction) > 0
+                            and isinstance(prediction[0], dict)
+                        ):
                             # Handle list of detection dictionaries - this is the correct format!
-                            print(f"Found list of {len(prediction)} detection dictionaries")
+                            print(
+                                f"Found list of {len(prediction)} detection dictionaries"
+                            )
                             all_keypoints = []
                             all_scores = []
                             all_bboxes = []
-                            
+
                             for person_detection in prediction:
-                                if "keypoints" in person_detection and "keypoint_scores" in person_detection:
+                                if (
+                                    "keypoints" in person_detection
+                                    and "keypoint_scores" in person_detection
+                                ):
                                     kpts = person_detection["keypoints"]
                                     scores = person_detection["keypoint_scores"]
                                     bbox = person_detection.get("bbox", [0, 0, 0, 0])
-                                    
+
                                     # Convert to numpy if they're tensors
                                     if hasattr(kpts, "cpu"):
                                         kpts = kpts.cpu().numpy()
@@ -207,22 +269,27 @@ class MMPoseWrapper(BasePoseModel):
                                         bbox = bbox.cpu().numpy()
                                     elif isinstance(bbox, list):
                                         bbox = np.array(bbox)
-                                    
+
                                     all_keypoints.append(kpts)
                                     all_scores.append(scores)
                                     all_bboxes.append(bbox)
-                            
+
                             if all_keypoints:
                                 keypoints = np.array(all_keypoints)
                                 keypoint_scores = np.array(all_scores)
                                 bboxes = np.array(all_bboxes)
-                                print(f"Successfully parsed {len(keypoints)} persons with keypoints shape {keypoints.shape}")
+                                print(
+                                    f"Successfully parsed {len(keypoints)} persons with keypoints shape {keypoints.shape}"
+                                )
                         else:
                             # Fallback - unknown prediction format
                             print(f"Unknown prediction format: {type(prediction)}")
-                            if hasattr(prediction, '__len__'):
+                            if hasattr(prediction, "__len__"):
                                 print(f"Length: {len(prediction)}")
-                            if isinstance(prediction, (list, tuple)) and len(prediction) > 0:
+                            if (
+                                isinstance(prediction, (list, tuple))
+                                and len(prediction) > 0
+                            ):
                                 print(f"First element: {type(prediction[0])}")
                 elif "instances" in result:
                     # Handle the format from your working code
