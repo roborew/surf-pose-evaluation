@@ -65,18 +65,91 @@ class VideoClip:
         """Extract individual maneuvers from this clip."""
         maneuvers = []
         for i, annotation in enumerate(self.annotations):
-            maneuver = Maneuver(
-                clip=self,
-                maneuver_id=f"{self.video_id}_maneuver_{i}",
-                maneuver_type=annotation["labels"][1],  # Maneuver type (e.g., "Pop-up")
-                execution_score=annotation["labels"][0],  # Execution score (e.g., "09")
-                start_time=annotation["start"],
-                end_time=annotation["end"],
-                start_frame=int(annotation["start"] * self.fps),
-                end_frame=int(annotation["end"] * self.fps),
-                annotation_data=annotation,
+            try:
+                # Validate annotation structure
+                if "labels" not in annotation:
+                    logger.warning(
+                        f"Annotation {i} in {self.video_id} missing 'labels' field, skipping"
+                    )
+                    continue
+
+                labels = annotation["labels"]
+                if not isinstance(labels, list):
+                    logger.warning(
+                        f"Annotation {i} in {self.video_id} has non-list labels: {labels}, skipping"
+                    )
+                    continue
+
+                # Strict validation: must have exactly 2 labels
+                if len(labels) != 2:
+                    logger.warning(
+                        f"Annotation {i} in {self.video_id} has incorrect number of labels (expected exactly 2, got {len(labels)}): {labels}, skipping"
+                    )
+                    continue
+
+                # Extract execution score and maneuver type with validation
+                execution_score_str = labels[0]
+                maneuver_type = labels[1]
+
+                # Check for empty, null, or whitespace-only values
+                if (
+                    not execution_score_str
+                    or not isinstance(execution_score_str, str)
+                    or not execution_score_str.strip()
+                ):
+                    logger.warning(
+                        f"Annotation {i} in {self.video_id} has empty/invalid execution score: '{execution_score_str}', skipping"
+                    )
+                    continue
+
+                if (
+                    not maneuver_type
+                    or not isinstance(maneuver_type, str)
+                    or not maneuver_type.strip()
+                ):
+                    logger.warning(
+                        f"Annotation {i} in {self.video_id} has empty/invalid maneuver type: '{maneuver_type}', skipping"
+                    )
+                    continue
+
+                maneuver = Maneuver(
+                    clip=self,
+                    maneuver_id=f"{self.video_id}_maneuver_{i}",
+                    maneuver_type=maneuver_type,  # Maneuver type (e.g., "Pop-up")
+                    execution_score=execution_score_str,  # Execution score (e.g., "09")
+                    start_time=annotation["start"],
+                    end_time=annotation["end"],
+                    start_frame=int(annotation["start"] * self.fps),
+                    end_frame=int(annotation["end"] * self.fps),
+                    annotation_data=annotation,
+                )
+                maneuvers.append(maneuver)
+
+            except (IndexError, KeyError, TypeError) as e:
+                logger.warning(
+                    f"Error processing annotation {i} in {self.video_id}: {e}, skipping"
+                )
+                continue
+            except Exception as e:
+                logger.error(
+                    f"Unexpected error processing annotation {i} in {self.video_id}: {e}"
+                )
+                continue
+
+        # Log summary of annotation processing
+        total_annotations = len(self.annotations)
+        valid_annotations = len(maneuvers)
+        skipped_annotations = total_annotations - valid_annotations
+
+        if skipped_annotations > 0:
+            logger.info(
+                f"Processed {self.video_id}: {valid_annotations}/{total_annotations} annotations valid, {skipped_annotations} skipped"
             )
-            maneuvers.append(maneuver)
+        else:
+            logger.debug(
+                f"Processed {self.video_id}: {valid_annotations}/{total_annotations} annotations valid"
+            )
+
         return maneuvers
 
 
