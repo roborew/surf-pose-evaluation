@@ -26,6 +26,7 @@ class OptunaPoseOptimizer:
         self.config = config
         self.run_manager = run_manager
         self.evaluator = PoseEvaluator(config)
+        self.evaluator.run_manager = run_manager  # Set run manager for visualizations
 
     def optimize_model(self, model_name: str, maneuvers: List) -> Dict:
         """Run Optuna optimization for a single model"""

@@ -101,6 +101,7 @@ def run_optuna_phase(run_manager: RunManager, args) -> Dict:
 
     # Load dataset
     evaluator = PoseEvaluator(config)
+    evaluator.run_manager = run_manager  # Set run manager for visualizations
     maneuvers = evaluator.data_loader.load_maneuvers(
         max_clips=args.max_clips,
         video_format=config["data_source"]["video_clips"].get("input_format", "h264"),
@@ -162,6 +163,7 @@ def run_comparison_phase(run_manager: RunManager, args) -> Dict:
 
     # Initialize evaluator
     evaluator = PoseEvaluator(config)
+    evaluator.run_manager = run_manager  # Set run manager for visualizations
 
     # Run evaluation for each model with MLflow logging
     results = {}

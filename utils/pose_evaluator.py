@@ -74,6 +74,9 @@ class PoseEvaluator:
         )
         self.video_visualizer = PoseVideoVisualizer(encoding_config)
 
+        # Run manager for output paths (set later if available)
+        self.run_manager = None
+
         # Initialize prediction file handler
         self._setup_prediction_handler()
 
@@ -412,7 +415,90 @@ class PoseEvaluator:
 
     def _create_sample_visualizations(self, model, model_name: str, maneuvers: List):
         """Create sample visualization videos"""
-        # Implementation would be moved from the original file
-        # Keeping this as a placeholder for now
+        from utils.pose_video_visualizer import PoseVideoVisualizer
+
         logging.info(f"Creating sample visualizations for {model_name}")
-        pass
+
+        # Get visualization config
+        viz_config = self.config.get("output", {}).get("visualization", {})
+        max_examples = viz_config.get("max_examples_per_model", 3)
+
+        # Get output directory from run manager if available
+        viz_dir = None
+        if hasattr(self, "run_manager") and self.run_manager:
+            viz_dir = self.run_manager.visualizations_dir
+        else:
+            # Fallback to config path
+            viz_dir = Path(viz_config.get("shared_storage_path", "./visualizations"))
+
+        viz_dir = Path(viz_dir)
+        viz_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize visualizer
+        encoding_config = viz_config.get("encoding", {})
+        visualizer = PoseVideoVisualizer(encoding_config)
+
+        created_count = 0
+        for i, maneuver in enumerate(maneuvers[:max_examples]):
+            try:
+                # Generate pose predictions for this maneuver
+                pose_results = self._generate_pose_predictions(model, maneuver)
+
+                if not pose_results:
+                    logging.warning(
+                        f"No pose results for maneuver {i}, skipping visualization"
+                    )
+                    continue
+
+                # Create output filename
+                video_stem = Path(maneuver["video_path"]).stem
+                output_filename = f"{model_name}_{video_stem}_visualization.mp4"
+                output_path = viz_dir / output_filename
+
+                # Create visualization video
+                success = visualizer.create_pose_visualization_video(
+                    video_path=maneuver["video_path"],
+                    pose_results=pose_results,
+                    output_path=str(output_path),
+                    model_name=model_name,
+                )
+
+                if success:
+                    created_count += 1
+                    logging.info(
+                        f"Created visualization {created_count}: {output_filename}"
+                    )
+                else:
+                    logging.warning(f"Failed to create visualization for {video_stem}")
+
+            except Exception as e:
+                logging.error(f"Error creating visualization for maneuver {i}: {e}")
+
+        logging.info(f"Created {created_count} visualization videos for {model_name}")
+
+    def _generate_pose_predictions(self, model, maneuver: Dict) -> List[Dict]:
+        """Generate pose predictions for a maneuver for visualization"""
+        try:
+            # Load video frames using the data loader
+            frames = self.data_loader.load_video_frames(maneuver)
+
+            pose_results = []
+            for i, frame in enumerate(frames):
+                # Get pose prediction for this frame
+                pose_result = model.predict(frame)
+
+                # Convert to format expected by visualizer
+                if pose_result:
+                    # Add frame index to the result
+                    if isinstance(pose_result, dict):
+                        pose_result["frame_id"] = i
+                    pose_results.append(pose_result)
+
+            logging.info(
+                f"Generated {len(pose_results)} pose predictions for visualization"
+            )
+            return pose_results
+
+        except Exception as e:
+            logging.error(f"Failed to generate pose predictions: {e}")
+            return []
