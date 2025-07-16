@@ -33,18 +33,18 @@ echo "Target environment: $TARGET_ENV_PATH"
 # Copy the installed packages from cache to target environment
 echo "📚 Installing cached OpenMMLab packages..."
 
-# Install exact versions (like macOS setup) to ensure compatibility
-echo "Installing exact OpenMMLab versions for compatibility..."
+# Install exact versions that are working in cache environment
+echo "Installing exact OpenMMLab versions from working cache..."
 
-# Use exact versions that work together (same as macOS)
-echo "Installing mmengine==0.8.4"
-pip install mmengine==0.8.4
+# Use the actual working versions from cache (not old pinned versions)
+echo "Installing mmengine==0.10.7"
+pip install mmengine==0.10.7
 
-echo "Installing mmcv==2.0.1"
-pip install mmcv==2.0.1 -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html
+echo "Installing mmcv==2.1.0 (pre-compiled wheel)"
+pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html --no-deps
 
-echo "Installing mmdet==3.1.0"
-pip install mmdet==3.1.0
+echo "Installing mmdet==3.2.0"
+pip install mmdet==3.2.0
 
 # For MMPose, we need to copy the development installation
 echo "🏗️  Setting up MMPose development installation..."
