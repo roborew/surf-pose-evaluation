@@ -85,7 +85,7 @@ def main():
     """Launch MLflow UI for selected experiment"""
     parser = argparse.ArgumentParser(description="Launch MLflow UI for experiment runs")
     parser.add_argument(
-        "--port", type=int, default=5000, help="Port for MLflow UI (default: 5000)"
+        "--port", type=int, default=5001, help="Port for MLflow UI (default: 5001)"
     )
     parser.add_argument(
         "--host",

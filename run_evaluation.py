@@ -146,6 +146,12 @@ def run_comparison_phase(run_manager: RunManager, args) -> Dict:
     with open(comparison_config_path, "r") as f:
         config = yaml.safe_load(f)
 
+    # Set MLflow experiment name from comparison config
+    import mlflow
+    experiment_name = config.get("mlflow", {}).get("experiment_name", "surf_pose_comparison")
+    mlflow.set_experiment(experiment_name)
+    logger.info(f"MLflow experiment set to: {experiment_name}")
+
     # Force h264 for macOS comparison (override any config issues)
     video_format_override = (
         "h264" if "macos" in comparison_config_path.lower() else None
@@ -157,8 +163,44 @@ def run_comparison_phase(run_manager: RunManager, args) -> Dict:
     # Initialize evaluator
     evaluator = PoseEvaluator(config)
 
-    # Run evaluation for each model
-    results = evaluator.evaluate_models(args.models, max_clips=args.max_clips)
+    # Run evaluation for each model with MLflow logging
+    results = {}
+    for model_name in args.models:
+        if model_name not in evaluator.get_available_models():
+            logger.warning(f"Model {model_name} not available, skipping")
+            continue
+            
+        logger.info(f"Running comparison evaluation for {model_name}")
+        
+        # Start MLflow run for comparison
+        run_name = f"{model_name}_comparison_eval"
+        with mlflow.start_run(run_name=run_name):
+            # Log run info
+            mlflow.log_param("model_name", model_name)
+            mlflow.log_param("phase", "comparison")
+            mlflow.log_param("max_clips", args.max_clips)
+            
+            # Run single model evaluation
+            model_result = evaluator._evaluate_single_model(
+                model_name, 
+                evaluator.data_loader.load_maneuvers(
+                    max_clips=args.max_clips, 
+                    video_format=evaluator._get_video_format()
+                )
+            )
+            
+            # Log metrics to MLflow
+            if model_result.get("pose_metrics"):
+                for metric, value in model_result["pose_metrics"].items():
+                    if isinstance(value, (int, float)):
+                        mlflow.log_metric(f"pose_{metric}", value)
+            
+            if model_result.get("performance_metrics"):
+                for metric, value in model_result["performance_metrics"].items():
+                    if isinstance(value, (int, float)):
+                        mlflow.log_metric(f"perf_{metric}", value)
+            
+            results[model_name] = model_result
 
     logger.info("✅ Comprehensive comparison completed successfully")
     return {"config_path": comparison_config_path, "results": results}

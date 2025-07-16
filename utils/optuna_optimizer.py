@@ -31,6 +31,11 @@ class OptunaPoseOptimizer:
         """Run Optuna optimization for a single model"""
         logging.info(f"Starting Optuna optimization for {model_name}")
 
+        # Set MLflow experiment name from config
+        experiment_name = self.config.get("mlflow", {}).get("experiment_name", "surf_pose_optuna")
+        mlflow.set_experiment(experiment_name)
+        logging.info(f"MLflow experiment set to: {experiment_name}")
+
         # Storage for trial results
         all_trial_results = []
         best_trial_result = None
