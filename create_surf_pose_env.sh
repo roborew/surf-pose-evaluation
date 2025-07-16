@@ -50,6 +50,10 @@ echo "Using cached versions: mmcv=$MMCV_VERSION, mmengine=$MMENGINE_VERSION, mmd
 pip install fsspec
 pip install -U openmim
 
+# Install common dependencies that MM packages need but --no-deps skips
+echo "Installing common MM dependencies..."
+pip install yapf addict terminaltables matplotlib seaborn xtcocotools
+
 # Install the exact cached versions
 echo "Installing mmengine==$MMENGINE_VERSION..."
 pip install mmengine==$MMENGINE_VERSION --no-deps
