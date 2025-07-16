@@ -149,7 +149,10 @@ def run_comparison_phase(run_manager: RunManager, args) -> Dict:
 
     # Set MLflow experiment name from comparison config
     import mlflow
-    experiment_name = config.get("mlflow", {}).get("experiment_name", "surf_pose_comparison")
+
+    experiment_name = config.get("mlflow", {}).get(
+        "experiment_name", "surf_pose_comparison"
+    )
     mlflow.set_experiment(experiment_name)
     logger.info(f"MLflow experiment set to: {experiment_name}")
 
@@ -171,9 +174,9 @@ def run_comparison_phase(run_manager: RunManager, args) -> Dict:
         if model_name not in evaluator.get_available_models():
             logger.warning(f"Model {model_name} not available, skipping")
             continue
-            
+
         logger.info(f"Running comparison evaluation for {model_name}")
-        
+
         # Start MLflow run for comparison
         run_name = f"{model_name}_comparison_eval"
         with mlflow.start_run(run_name=run_name):
@@ -181,27 +184,25 @@ def run_comparison_phase(run_manager: RunManager, args) -> Dict:
             mlflow.log_param("model_name", model_name)
             mlflow.log_param("phase", "comparison")
             mlflow.log_param("max_clips", args.max_clips)
-            
+
             # Run single model evaluation
             model_result = evaluator._evaluate_single_model(
-                model_name, 
+                model_name,
                 evaluator.data_loader.load_maneuvers(
-                    max_clips=args.max_clips, 
-                    video_format=evaluator._get_video_format()
-                )
+                    max_clips=args.max_clips, video_format=evaluator._get_video_format()
+                ),
             )
-            
-            # Log metrics to MLflow
-            if model_result.get("pose_metrics"):
-                for metric, value in model_result["pose_metrics"].items():
+
+            # Log metrics to MLflow - Fix: Access metrics correctly
+            if isinstance(model_result, dict) and "error" not in model_result:
+                # Log all available metrics
+                for metric_name, value in model_result.items():
                     if isinstance(value, (int, float)):
-                        mlflow.log_metric(f"pose_{metric}", value)
-            
-            if model_result.get("performance_metrics"):
-                for metric, value in model_result["performance_metrics"].items():
-                    if isinstance(value, (int, float)):
-                        mlflow.log_metric(f"perf_{metric}", value)
-            
+                        # Convert numpy types to native Python types
+                        if hasattr(value, "item"):
+                            value = value.item()
+                        mlflow.log_metric(metric_name, value)
+
             results[model_name] = model_result
 
     logger.info("✅ Comprehensive comparison completed successfully")
@@ -220,11 +221,40 @@ def generate_summary_report(run_manager: RunManager, models: list):
 
         mlflow.set_tracking_uri(str(run_manager.mlflow_dir))
 
-        # Get comparison experiment
-        experiment = mlflow.get_experiment_by_name("surf_pose_production_comparison")
+        # Get comparison experiment - Fix: Use dynamic experiment name from config
+        # Try to load the comparison config to get the correct experiment name
+        comparison_config_files = list(
+            run_manager.run_dir.glob("comparison_config_*.yaml")
+        )
+        experiment_name = "surf_pose_production_comparison"  # default
+
+        if comparison_config_files:
+            try:
+                import yaml
+
+                with open(comparison_config_files[0], "r") as f:
+                    config = yaml.safe_load(f)
+                experiment_name = config.get("mlflow", {}).get(
+                    "experiment_name", experiment_name
+                )
+            except Exception as e:
+                logger.warning(f"Could not read comparison config: {e}")
+
+        experiment = mlflow.get_experiment_by_name(experiment_name)
         if not experiment:
-            logger.error("❌ Comparison experiment not found")
-            return False
+            # Try to find any experiment with "comparison" in the name
+            all_experiments = mlflow.search_experiments()
+            comparison_experiments = [
+                exp for exp in all_experiments if "comparison" in exp.name.lower()
+            ]
+            if comparison_experiments:
+                experiment = comparison_experiments[0]  # Use the first one found
+                logger.info(f"Using experiment: {experiment.name}")
+            else:
+                logger.error(
+                    f"❌ No comparison experiment found (looking for '{experiment_name}')"
+                )
+                return False
 
         # Get all runs from comparison
         runs = mlflow.search_runs(
@@ -317,6 +347,7 @@ def main():
 
     # Set MLflow tracking URI immediately after run manager creation
     import mlflow
+
     mlflow.set_tracking_uri(str(run_manager.mlflow_dir))
     logger.info(f"🔗 MLflow tracking URI set to: {run_manager.mlflow_dir}")
 

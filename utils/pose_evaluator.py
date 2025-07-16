@@ -451,16 +451,18 @@ class PoseEvaluator:
                     continue
 
                 # Create output filename
-                video_stem = Path(maneuver["video_path"]).stem
+                video_stem = Path(maneuver.file_path).stem
                 output_filename = f"{model_name}_{video_stem}_visualization.mp4"
                 output_path = viz_dir / output_filename
 
                 # Create visualization video
                 success = visualizer.create_pose_visualization_video(
-                    video_path=maneuver["video_path"],
+                    video_path=maneuver.file_path,
                     pose_results=pose_results,
                     output_path=str(output_path),
                     model_name=model_name,
+                    maneuver_start_frame=maneuver.start_frame,
+                    maneuver_end_frame=maneuver.end_frame,
                 )
 
                 if success:
@@ -476,7 +478,7 @@ class PoseEvaluator:
 
         logging.info(f"Created {created_count} visualization videos for {model_name}")
 
-    def _generate_pose_predictions(self, model, maneuver: Dict) -> List[Dict]:
+    def _generate_pose_predictions(self, model, maneuver) -> List[Dict]:
         """Generate pose predictions for a maneuver for visualization"""
         try:
             # Load video frames using the data loader
