@@ -39,10 +39,24 @@ echo "Target environment: $CONDA_PREFIX_TARGET"
 echo "📋 Installing exact MMPose ecosystem versions from cache..."
 
 # Get the exact versions from cache environment
-MMCV_VERSION=$(conda list -n mmpose_cache mmcv | grep mmcv | awk '{print $2}')
-MMENGINE_VERSION=$(conda list -n mmpose_cache mmengine | grep mmengine | awk '{print $2}')
-MMDET_VERSION=$(conda list -n mmpose_cache mmdet | grep mmdet | awk '{print $2}')
-MMPOSE_VERSION=$(conda list -n mmpose_cache mmpose | grep mmpose | awk '{print $2}')
+echo "🔍 Checking cached package versions..."
+MMCV_VERSION=$(conda list -n mmpose_cache mmcv | grep "^mmcv " | awk '{print $2}')
+MMENGINE_VERSION=$(conda list -n mmpose_cache mmengine | grep "^mmengine " | awk '{print $2}')
+MMDET_VERSION=$(conda list -n mmpose_cache mmdet | grep "^mmdet " | awk '{print $2}')
+MMPOSE_VERSION=$(conda list -n mmpose_cache mmpose | grep "^mmpose " | awk '{print $2}')
+
+# Validate versions
+if [ -z "$MMCV_VERSION" ] || [ -z "$MMENGINE_VERSION" ] || [ -z "$MMDET_VERSION" ] || [ -z "$MMPOSE_VERSION" ]; then
+    echo "❌ Failed to extract package versions from cache:"
+    echo "   mmcv: '$MMCV_VERSION'"
+    echo "   mmengine: '$MMENGINE_VERSION'"
+    echo "   mmdet: '$MMDET_VERSION'"  
+    echo "   mmpose: '$MMPOSE_VERSION'"
+    echo ""
+    echo "Debug: Listing cache environment packages:"
+    conda list -n mmpose_cache | grep -E "(mmcv|mmengine|mmdet|mmpose)"
+    exit 1
+fi
 
 echo "Using cached versions: mmcv=$MMCV_VERSION, mmengine=$MMENGINE_VERSION, mmdet=$MMDET_VERSION, mmpose=$MMPOSE_VERSION"
 
