@@ -271,6 +271,11 @@ def main():
     # Print run information
     run_manager.print_run_info()
 
+    # Set MLflow tracking URI immediately after run manager creation
+    import mlflow
+    mlflow.set_tracking_uri(str(run_manager.mlflow_dir))
+    logger.info(f"🔗 MLflow tracking URI set to: {run_manager.mlflow_dir}")
+
     # Optional cleanup
     if args.cleanup:
         run_manager.cleanup_old_runs()
