@@ -144,10 +144,10 @@ class RunManager:
             },
         }
 
-    def get_predictions_config(self) -> Dict[str, Any]:
+    def get_predictions_config(self, enabled: bool = True) -> Dict[str, Any]:
         """Get predictions configuration for this run"""
         return {
-            "enabled": True,
+            "enabled": enabled,
             "base_path": str(self.predictions_dir),
             "shared_storage_path": str(self.predictions_dir),
             "format": "json",
@@ -155,10 +155,10 @@ class RunManager:
             "compress": False,
         }
 
-    def get_visualizations_config(self) -> Dict[str, Any]:
+    def get_visualizations_config(self, enabled: bool = True) -> Dict[str, Any]:
         """Get visualizations configuration for this run"""
         return {
-            "enabled": True,
+            "enabled": enabled,
             "save_overlay_videos": True,
             "save_keypoint_plots": True,
             "save_comparison_plots": True,
@@ -216,8 +216,21 @@ class RunManager:
         # Create output section with proper nesting for evaluate_pose_models.py compatibility
         if "output" not in config:
             config["output"] = {}
-        config["output"]["predictions"] = self.get_predictions_config()
-        config["output"]["visualization"] = self.get_visualizations_config()
+
+        # Preserve original enabled/disabled settings from production config
+        original_predictions_enabled = (
+            config.get("output", {}).get("predictions", {}).get("enabled", True)
+        )
+        original_visualizations_enabled = (
+            config.get("output", {}).get("visualization", {}).get("enabled", True)
+        )
+
+        config["output"]["predictions"] = self.get_predictions_config(
+            enabled=original_predictions_enabled
+        )
+        config["output"]["visualization"] = self.get_visualizations_config(
+            enabled=original_visualizations_enabled
+        )
         config["best_params"] = self.get_best_params_config()
 
         # Update max_clips if provided

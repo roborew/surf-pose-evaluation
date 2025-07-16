@@ -16,28 +16,46 @@ class MediaPipeWrapper(BasePoseModel):
     """MediaPipe Pose estimation wrapper with robust initialization for macOS"""
 
     def __init__(self, device: str = "cpu", **kwargs):
-        """Initialize MediaPipe pose model
+        """Initialize MediaPipe pose estimation
 
         Args:
             device: Compute device (MediaPipe runs on CPU)
-            **kwargs: Model configuration
+            **kwargs: Additional configuration options
         """
-        super().__init__(device, **kwargs)
+        super().__init__(device=device, **kwargs)
 
-        # MediaPipe configuration
-        self.static_image_mode = kwargs.get("static_image_mode", False)
-        self.model_complexity = kwargs.get("model_complexity", 1)
-        self.smooth_landmarks = kwargs.get("smooth_landmarks", True)
+        # Model configuration with surf-optimized settings
+        self.model_complexity = kwargs.get("model_complexity", 1)  # Use balanced model
         self.enable_segmentation = kwargs.get("enable_segmentation", False)
-        self.min_detection_confidence = kwargs.get("min_detection_confidence", 0.5)
-        self.min_tracking_confidence = kwargs.get("min_tracking_confidence", 0.5)
-        
+        self.smooth_landmarks = kwargs.get("smooth_landmarks", True)
+        self.min_detection_confidence = kwargs.get(
+            "min_detection_confidence", 0.3
+        )  # Lowered for surf footage
+        self.min_tracking_confidence = kwargs.get(
+            "min_tracking_confidence", 0.3
+        )  # Lowered for surf footage
+
+        # Surf-specific optimizations
+        self.static_image_mode = kwargs.get(
+            "static_image_mode", False
+        )  # Better for video sequences
+
+        # Initialize MediaPipe components
+        self.mp_pose = None
+        self.mp_drawing = None
+        self.model = None
+
         # macOS compatibility: Force model_complexity=0 if higher values are problematic
         import platform
+
         if platform.system().lower() == "darwin":  # macOS
             if self.model_complexity > 0:
-                logging.warning(f"MediaPipe model_complexity={self.model_complexity} may be unstable on macOS, will try fallback to 0 if needed")
-                self.original_model_complexity = self.model_complexity  # Store original for fallback
+                logging.warning(
+                    f"MediaPipe model_complexity={self.model_complexity} may be unstable on macOS, will try fallback to 0 if needed"
+                )
+                self.original_model_complexity = (
+                    self.model_complexity
+                )  # Store original for fallback
 
         # Initialize MediaPipe
         self.mp_pose = mp.solutions.pose
@@ -47,43 +65,44 @@ class MediaPipeWrapper(BasePoseModel):
         self.load_model()
 
     def load_model(self) -> None:
-        """Load and initialize MediaPipe Pose model with CUDA-first approach"""
-        import os
-        import platform
-
-        os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Suppress TF warnings
-        
-        # CUDA-first: Enable GPU on Linux, CPU fallback on macOS for stability
-        if platform.system().lower() == "darwin":  # macOS
-            os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"  # CPU for macOS stability
-            os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"
-            os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # Disable oneDNN optimizations
-            os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Reduce logging
-            logging.info("MediaPipe using CPU on macOS for stability")
-        else:  # Linux/Windows - Enable GPU acceleration
-            os.environ["MEDIAPIPE_DISABLE_GPU"] = "0"  # Enable GPU
-            os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"  # Allow GPU memory growth
-            logging.info("MediaPipe enabling GPU acceleration for production")
+        """Load MediaPipe pose estimation model with optimized settings"""
+        if self.is_initialized:
+            return
 
         try:
-            # First try with the configured parameters
-            self.model = self._create_pose_model()
+            logging.info("Initializing MediaPipe Pose with surf-optimized settings...")
+            import mediapipe as mp
+
+            self.mp_pose = mp.solutions.pose
+            self.mp_drawing = mp.solutions.drawing_utils
+
+            # Create pose model with surf-optimized settings
+            self.model = self.mp_pose.Pose(
+                static_image_mode=self.static_image_mode,
+                model_complexity=self.model_complexity,
+                smooth_landmarks=self.smooth_landmarks,
+                enable_segmentation=self.enable_segmentation,
+                min_detection_confidence=self.min_detection_confidence,
+                min_tracking_confidence=self.min_tracking_confidence,
+            )
+
             self.is_initialized = True
-            logging.info("MediaPipe Pose initialized successfully")
+            logging.info(
+                f"MediaPipe initialized successfully (complexity={self.model_complexity}, "
+                f"detection_confidence={self.min_detection_confidence}, "
+                f"tracking_confidence={self.min_tracking_confidence})"
+            )
+
         except Exception as e:
-            logging.warning(f"Initial MediaPipe initialization failed: {e}")
-            # Try fallback initialization strategies
-            if self._try_fallback_initialization():
-                logging.info("MediaPipe Pose initialized with fallback configuration")
-            else:
-                raise RuntimeError(
-                    f"Failed to initialize MediaPipe Pose after trying all fallback options: {e}"
-                )
+            logging.error(f"Failed to initialize MediaPipe: {e}")
+            # Try fallback initialization
+            if not self._try_fallback_initialization():
+                raise RuntimeError(f"Failed to initialize MediaPipe pose model: {e}")
 
     def _create_pose_model(self):
         """Create MediaPipe Pose model with current configuration"""
         import platform
-        
+
         # Try original configuration first
         try:
             return self.mp_pose.Pose(
@@ -97,8 +116,12 @@ class MediaPipeWrapper(BasePoseModel):
         except Exception as e:
             # On macOS, if model_complexity > 0 fails, try with complexity=0
             if platform.system().lower() == "darwin" and self.model_complexity > 0:
-                logging.warning(f"MediaPipe model_complexity={self.model_complexity} failed on macOS: {e}")
-                logging.info("Falling back to model_complexity=0 for macOS compatibility")
+                logging.warning(
+                    f"MediaPipe model_complexity={self.model_complexity} failed on macOS: {e}"
+                )
+                logging.info(
+                    "Falling back to model_complexity=0 for macOS compatibility"
+                )
                 self.model_complexity = 0  # Update to working value
                 return self.mp_pose.Pose(
                     static_image_mode=self.static_image_mode,
@@ -225,27 +248,30 @@ class MediaPipeWrapper(BasePoseModel):
         except Exception as e:
             logging.error(f"MediaPipe inference failed: {e}")
             inference_time = time.time() - start_time
-            
+
             # Try fallback with model_complexity=0 if on macOS and complexity > 0
             import platform
+
             if platform.system().lower() == "darwin" and self.model_complexity > 0:
                 try:
-                    logging.warning(f"Attempting fallback with model_complexity=0 due to inference failure")
+                    logging.warning(
+                        f"Attempting fallback with model_complexity=0 due to inference failure"
+                    )
                     # Close the failing model
-                    if hasattr(self, 'model') and self.model:
+                    if hasattr(self, "model") and self.model:
                         self.model.close()
-                    
+
                     # Reinitialize with complexity=0
                     self.model_complexity = 0
                     self.model = self._create_pose_model()
-                    
+
                     # Retry inference
                     start_time = time.time()  # Reset timer
                     results = self.model.process(rgb_image)
                     inference_time = time.time() - start_time
-                    
+
                     logging.info(f"Fallback to model_complexity=0 successful")
-                    
+
                 except Exception as e2:
                     logging.error(f"Fallback inference also failed: {e2}")
                     # Return empty results on failure

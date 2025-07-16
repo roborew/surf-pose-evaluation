@@ -60,14 +60,14 @@ evaluation:
 optuna:
   enabled: false # Disabled for comparison phase
 
-# Predictions Configuration
+# Predictions Configuration - ENABLED for final model comparison
 predictions:
   enabled: true
   save_detailed_predictions: true
   include_confidence_scores: true
   include_bounding_boxes: true
 
-# Visualizations Configuration
+# Visualizations Configuration - ENABLED for final model comparison
 visualizations:
   enabled: true
   save_overlay_videos: true

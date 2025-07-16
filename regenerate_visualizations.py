@@ -96,8 +96,10 @@ def regenerate_visualizations_from_predictions(run_path: str):
 
                 # Convert prediction frames to visualization format
                 pose_results = []
+                frames_with_poses = 0
+                total_frames = len(prediction_data["frames"])
                 for frame_data in prediction_data["frames"]:
-                    if frame_data["persons"]:
+                    if frame_data.get("persons") and len(frame_data["persons"]) > 0:
                         # Convert to the format expected by visualizer
                         frame_result = {
                             "num_persons": len(frame_data["persons"]),
@@ -131,6 +133,7 @@ def regenerate_visualizations_from_predictions(run_path: str):
                                 )
 
                         pose_results.append(frame_result)
+                        frames_with_poses += 1
                     else:
                         # Empty frame
                         pose_results.append(

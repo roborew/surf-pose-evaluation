@@ -77,11 +77,140 @@ class PoseVideoVisualizer:
         self.kpt_radius = 3
         self.bbox_thickness = 2
 
+        # Detect best available encoder
+        self._best_encoder = self._detect_best_encoder()
+
+    def _detect_best_encoder(self) -> Dict[str, str]:
+        """Detect the best available hardware encoder"""
+        import platform
+        import subprocess
+
+        best_encoder = {
+            "h264": "libx264",  # Default fallback
+            "h265": "libx265",  # Default fallback
+            "hardware_type": "cpu",
+        }
+
+        try:
+            # Check available encoders
+            result = subprocess.run(
+                ["ffmpeg", "-encoders"], capture_output=True, text=True, timeout=10
+            )
+
+            if result.returncode != 0:
+                logger.warning(
+                    "Could not detect available encoders, using CPU fallback"
+                )
+                return best_encoder
+
+            encoders_output = result.stdout
+
+            # Check for NVIDIA NVENC (best for RTX GPUs)
+            if "h264_nvenc" in encoders_output:
+                best_encoder.update(
+                    {
+                        "h264": "h264_nvenc",
+                        "h265": "hevc_nvenc",
+                        "hardware_type": "nvidia_nvenc",
+                    }
+                )
+                logger.info("🚀 Detected NVIDIA NVENC encoder - using GPU acceleration")
+                return best_encoder
+
+            # Check for macOS VideoToolbox
+            if platform.system() == "Darwin" and "h264_videotoolbox" in encoders_output:
+                best_encoder.update(
+                    {
+                        "h264": "h264_videotoolbox",
+                        "h265": "hevc_videotoolbox",
+                        "hardware_type": "videotoolbox",
+                    }
+                )
+                logger.info(
+                    "🍎 Detected VideoToolbox encoder - using hardware acceleration"
+                )
+                return best_encoder
+
+            # Check for Intel QuickSync
+            if "h264_qsv" in encoders_output:
+                best_encoder.update(
+                    {
+                        "h264": "h264_qsv",
+                        "h265": "hevc_qsv",
+                        "hardware_type": "intel_qsv",
+                    }
+                )
+                logger.info(
+                    "⚡ Detected Intel QuickSync encoder - using hardware acceleration"
+                )
+                return best_encoder
+
+            # Check for AMD AMF
+            if "h264_amf" in encoders_output:
+                best_encoder.update(
+                    {"h264": "h264_amf", "h265": "hevc_amf", "hardware_type": "amd_amf"}
+                )
+                logger.info("🔥 Detected AMD AMF encoder - using hardware acceleration")
+                return best_encoder
+
+            logger.info(
+                "💻 No hardware encoders detected - using optimized CPU encoding"
+            )
+
+        except subprocess.TimeoutExpired:
+            logger.warning("Encoder detection timed out, using CPU fallback")
+        except Exception as e:
+            logger.warning(f"Encoder detection failed: {e}, using CPU fallback")
+
+        return best_encoder
+
+    def _get_encoder_params(
+        self, codec: str, hardware_type: str, config: Dict
+    ) -> tuple:
+        """Get encoder-specific quality and preset parameters"""
+        quality_config = config.get("quality", {})
+        crf = quality_config.get("crf", 18)
+        preset = quality_config.get("preset", "medium")
+
+        if hardware_type == "nvidia_nvenc":
+            # NVENC parameters
+            quality_params = ["-cq", str(crf)]  # Use -cq instead of -crf for NVENC
+            if "nvenc" in codec:
+                preset_params = ["-preset", "p4"]  # p1=fastest, p7=slowest, p4=balanced
+            else:
+                preset_params = ["-preset", preset]
+
+        elif hardware_type == "videotoolbox":
+            # VideoToolbox parameters
+            quality_params = ["-q:v", str(crf)]  # Use -q:v for VideoToolbox
+            preset_params = []  # VideoToolbox doesn't use presets
+
+        elif hardware_type == "intel_qsv":
+            # Intel QuickSync parameters
+            quality_params = ["-global_quality", str(crf)]
+            preset_params = [
+                "-preset",
+                "medium",
+            ]  # QSV presets: veryslow, slower, slow, medium, fast, faster, veryfast
+
+        elif hardware_type == "amd_amf":
+            # AMD AMF parameters
+            quality_params = ["-qp_i", str(crf), "-qp_p", str(crf)]
+            preset_params = ["-quality", "balanced"]  # speed, balanced, quality
+
+        else:
+            # CPU encoding (libx264/libx265)
+            quality_params = ["-crf", str(crf)]
+            preset_params = ["-preset", preset]
+
+        return quality_params, preset_params
+
     def _get_default_encoding_config(self) -> Dict[str, Any]:
-        """Get default video encoding configuration"""
+        """Get default video encoding configuration with hardware acceleration"""
         return {
             "format": "h264",  # h264, h265, prores, ffv1, lossless
-            "codec": "libx264",
+            "codec": "auto",  # auto, libx264, h264_nvenc, h264_videotoolbox
+            "hardware_acceleration": True,  # Enable hardware acceleration when available
             "quality": {
                 "crf": 18,  # Lower = better quality (0-51 for x264)
                 "preset": "medium",  # ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
@@ -98,20 +227,33 @@ class PoseVideoVisualizer:
         """Get FFmpeg encoding settings based on configuration"""
         config = self.encoding_config
         format_type = config.get("format", "h264").lower()
+        use_hardware = config.get("hardware_acceleration", True)
+        codec_override = config.get("codec", "auto")
 
         if format_type == "h264":
+            # Determine codec to use
+            if codec_override == "auto" and use_hardware:
+                video_codec = self._best_encoder["h264"]
+                hardware_type = self._best_encoder["hardware_type"]
+            elif codec_override != "auto":
+                video_codec = codec_override
+                hardware_type = "manual"
+            else:
+                video_codec = "libx264"
+                hardware_type = "cpu"
+
+            # Get quality parameters based on encoder type
+            quality_params, preset_params = self._get_encoder_params(
+                video_codec, hardware_type, config
+            )
+
             return {
-                "video_codec": "libx264",
-                "quality_params": [
-                    "-crf",
-                    str(config.get("quality", {}).get("crf", 18)),
-                ],
-                "preset_params": [
-                    "-preset",
-                    config.get("quality", {}).get("preset", "medium"),
-                ],
+                "video_codec": video_codec,
+                "quality_params": quality_params,
+                "preset_params": preset_params,
                 "pixel_format": config.get("pixel_format", "yuv420p"),
                 "container": config.get("container", "mp4"),
+                "hardware_type": hardware_type,
             }
         elif format_type == "h265":
             return {
@@ -516,8 +658,13 @@ class PoseVideoVisualizer:
             # Get encoding settings
             encoding_settings = self._get_encoding_settings()
 
+            # Log encoder being used
+            codec = encoding_settings["video_codec"]
+            hw_type = encoding_settings.get("hardware_type", "unknown")
+            logger.info(f"🎬 Using encoder: {codec} ({hw_type})")
+
             # Video encoding settings
-            cmd.extend(["-c:v", encoding_settings["video_codec"]])
+            cmd.extend(["-c:v", codec])
             cmd.extend(encoding_settings["quality_params"])
             cmd.extend(encoding_settings["preset_params"])
             cmd.extend(["-pix_fmt", encoding_settings["pixel_format"]])

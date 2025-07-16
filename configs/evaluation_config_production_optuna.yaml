@@ -82,9 +82,9 @@ mlflow:
 
 output:
   predictions:
-    enabled: false # Disabled during optimization for speed
+    enabled: false # DISABLED during Optuna optimization for speed
   visualization:
-    enabled: false # Disabled during optimization for speed
+    enabled: false # DISABLED during Optuna optimization for speed
 
 # Reference configurations (commented out - handled by RunManager or rarely changed)
 #
