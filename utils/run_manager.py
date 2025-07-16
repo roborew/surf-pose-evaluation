@@ -7,12 +7,29 @@ import os
 import json
 import yaml
 import shutil
+import numpy as np
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def convert_numpy_types(obj):
+    """Convert numpy types to native Python types for JSON serialization"""
+    if isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    else:
+        return obj
 
 
 class RunManager:
@@ -281,7 +298,7 @@ class RunManager:
                 "timestamp": self.timestamp,
                 "completed_at": datetime.now().isoformat(),
             },
-            "results": results,
+            "results": convert_numpy_types(results),
             "directories": {
                 "mlflow": str(self.mlflow_dir),
                 "predictions": str(self.predictions_dir),
