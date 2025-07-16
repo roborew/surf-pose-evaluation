@@ -21,63 +21,130 @@ conda env create -f environment.yml
 # Activate the new environment
 conda activate surf_pose_eval
 
-echo "🔧 Copying MMPose packages from cache..."
+echo "🔄 Copying cached MMPose packages to surf_pose_eval environment..."
 
-# Get the package locations from cache environment
-CACHE_ENV_PATH=$(conda info --envs | grep mmpose_cache | awk '{print $NF}')
-TARGET_ENV_PATH=$(conda info --envs | grep surf_pose_eval | awk '{print $NF}')
+# Get the conda environments path
+CONDA_PREFIX_CACHE=$(conda info --envs | grep mmpose_cache | awk '{print $2}')
+CONDA_PREFIX_TARGET=$(conda info --envs | grep surf_pose_eval | awk '{print $2}')
 
-echo "Cache environment: $CACHE_ENV_PATH"
-echo "Target environment: $TARGET_ENV_PATH"
-
-# Copy the installed packages from cache to target environment
-echo "📚 Installing cached OpenMMLab packages..."
-
-# Install exact versions that are working in cache environment
-echo "Installing exact OpenMMLab versions from working cache..."
-
-# Use the actual working versions from cache (not old pinned versions)
-echo "Installing mmengine==0.10.7"
-pip install mmengine==0.10.7
-
-echo "Installing mmcv==2.1.0 (pre-compiled wheel)"
-pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html --no-deps
-
-echo "Installing mmdet==3.2.0"
-pip install mmdet==3.2.0
-
-# For MMPose, we need to copy the development installation
-echo "🏗️  Setting up MMPose development installation..."
-ORIGINAL_DIR=$(pwd)
-
-# Check if mmpose source exists
-if [ -d "../mmpose" ]; then
-    cd ../mmpose
-    pip install -v -e .
-else
-    echo "❌ MMPose source directory not found at ../mmpose"
-    echo "Clone MMPose manually or run setup_mmpose_production.sh again"
-    cd "$ORIGINAL_DIR"
+if [ -z "$CONDA_PREFIX_CACHE" ] || [ -z "$CONDA_PREFIX_TARGET" ]; then
+    echo "❌ Could not find environment paths"
     exit 1
 fi
 
-cd "$ORIGINAL_DIR"
+echo "Cache environment: $CONDA_PREFIX_CACHE"
+echo "Target environment: $CONDA_PREFIX_TARGET"
 
-echo "✅ surf_pose_eval environment ready!"
+# Copy the exact package versions that were successfully compiled in cache
+echo "📋 Installing exact MMPose ecosystem versions from cache..."
+
+# Get the exact versions from cache environment
+MMCV_VERSION=$(conda list -n mmpose_cache mmcv | grep mmcv | awk '{print $2}')
+MMENGINE_VERSION=$(conda list -n mmpose_cache mmengine | grep mmengine | awk '{print $2}')
+MMDET_VERSION=$(conda list -n mmpose_cache mmdet | grep mmdet | awk '{print $2}')
+MMPOSE_VERSION=$(conda list -n mmpose_cache mmpose | grep mmpose | awk '{print $2}')
+
+echo "Using cached versions: mmcv=$MMCV_VERSION, mmengine=$MMENGINE_VERSION, mmdet=$MMDET_VERSION, mmpose=$MMPOSE_VERSION"
+
+# Install the exact same versions with no-deps to use the compiled versions
+pip install fsspec
+pip install -U openmim
+
+# Install the exact cached versions
+echo "Installing mmengine==$MMENGINE_VERSION..."
+pip install mmengine==$MMENGINE_VERSION --no-deps
+
+echo "Installing mmcv==$MMCV_VERSION..."
+pip install mmcv==$MMCV_VERSION -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html --no-deps
+
+echo "Installing mmdet==$MMDET_VERSION..."
+pip install mmdet==$MMDET_VERSION --no-deps
+
+echo "Installing mmpose==$MMPOSE_VERSION..."
+pip install mmpose==$MMPOSE_VERSION --no-deps
+
+# Copy the source installations (which include complete configs) from cache
+echo "🔗 Linking source installations for complete model zoo access..."
+
+# Check if the mmdetection source was installed in development mode
+if [ -d "../mmdetection" ]; then
+    echo "Setting up MMDetection source link..."
+    cd ../mmdetection
+    pip install -v -e . --no-deps
+    cd - > /dev/null
+else
+    echo "⚠️  MMDetection source not found - configs may be limited"
+fi
+
+# Check if the mmpose source was installed in development mode  
+if [ -d "../mmpose" ]; then
+    echo "Setting up MMPose source link..."
+    cd ../mmpose
+    pip install -v -e . --no-deps
+    cd - > /dev/null
+else
+    echo "⚠️  MMPose source not found - using pip-installed version"
+fi
+
+echo "✅ Environment 'surf_pose_eval' created successfully!"
 echo ""
-echo "🎯 To use the environment:"
-echo "  conda activate surf_pose_eval"
-echo "  python evaluate_pose_models.py ..."
-echo ""
-echo "Testing installation:"
+echo "🧪 Testing installation..."
+
+# Test the installation
 python -c "
+import sys
+print('Python version:', sys.version)
+
 try:
-    import mmcv, mmengine, mmdet, mmpose
-    print('✅ All MMPose packages successfully installed')
-    print(f'  mmcv: {mmcv.__version__}')
-    print(f'  mmengine: {mmengine.__version__}')
-    print(f'  mmdet: {mmdet.__version__}')
-    print(f'  mmpose: {mmpose.__version__}')
+    import torch
+    print('✅ PyTorch version:', torch.__version__)
+    print('✅ CUDA available:', torch.cuda.is_available())
+except ImportError as e:
+    print('❌ PyTorch import failed:', e)
+
+try:
+    import mmcv
+    print('✅ MMCV version:', mmcv.__version__)
+except ImportError as e:
+    print('❌ MMCV import failed:', e)
+
+try:
+    import mmengine
+    print('✅ MMEngine version:', mmengine.__version__)
+except ImportError as e:
+    print('❌ MMEngine import failed:', e)
+
+try:
+    import mmdet
+    print('✅ MMDetection version:', mmdet.__version__)
+except ImportError as e:
+    print('❌ MMDetection import failed:', e)
+
+try:
+    import mmpose
+    print('✅ MMPose version:', mmpose.__version__)
+except ImportError as e:
+    print('❌ MMPose import failed:', e)
+
+try:
+    from mmpose.apis import MMPoseInferencer
+    print('✅ MMPose inferencer can be imported')
+except ImportError as e:
+    print('❌ MMPose inferencer import failed:', e)
+
+print('\\n🎯 Testing MMDetection model zoo access...')
+try:
+    from mmdet.apis import init_detector
+    # Try to access a common model config that should be available
+    import mmdet.models
+    print('✅ MMDetection model registry accessible')
 except Exception as e:
-    print(f'❌ Installation test failed: {e}')
-" 
+    print('❌ MMDetection model access failed:', e)
+"
+
+echo ""
+echo "🚀 Setup complete! Activate the environment with:"
+echo "   conda activate surf_pose_eval"
+echo ""
+echo "📊 Run evaluation with:"
+echo "   python run_evaluation.py --config configs/evaluation_config_production_comparison.yaml" 
