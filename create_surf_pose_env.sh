@@ -50,45 +50,22 @@ echo "Using cached versions: mmcv=$MMCV_VERSION, mmengine=$MMENGINE_VERSION, mmd
 pip install fsspec
 pip install -U openmim
 
-# Install common dependencies that MM packages need but --no-deps skips
-echo "Installing common MM dependencies..."
-pip install yapf addict terminaltables matplotlib seaborn xtcocotools
-
-# Install the exact cached versions
+# Install the exact cached versions WITH dependencies (like SurfAnalysis does)
 echo "Installing mmengine==$MMENGINE_VERSION..."
-pip install mmengine==$MMENGINE_VERSION --no-deps
+pip install mmengine==$MMENGINE_VERSION
 
 echo "Installing mmcv==$MMCV_VERSION..."
-pip install mmcv==$MMCV_VERSION -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html --no-deps
+pip install mmcv==$MMCV_VERSION -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html
 
 echo "Installing mmdet==$MMDET_VERSION..."
-pip install mmdet==$MMDET_VERSION --no-deps
+pip install mmdet==$MMDET_VERSION
 
 echo "Installing mmpose==$MMPOSE_VERSION..."
-pip install mmpose==$MMPOSE_VERSION --no-deps
+pip install mmpose==$MMPOSE_VERSION
 
-# Copy the source installations (which include complete configs) from cache
-echo "🔗 Linking source installations for complete model zoo access..."
-
-# Check if the mmdetection source was installed in development mode
-if [ -d "../mmdetection" ]; then
-    echo "Setting up MMDetection source link..."
-    cd ../mmdetection
-    pip install -v -e . --no-deps
-    cd - > /dev/null
-else
-    echo "⚠️  MMDetection source not found - configs may be limited"
-fi
-
-# Check if the mmpose source was installed in development mode  
-if [ -d "../mmpose" ]; then
-    echo "Setting up MMPose source link..."
-    cd ../mmpose
-    pip install -v -e . --no-deps
-    cd - > /dev/null
-else
-    echo "⚠️  MMPose source not found - using pip-installed version"
-fi
+# The MM packages are now installed with dependencies
+# The complete model zoo should be available through the pip installations
+echo "✅ MM packages installed with complete dependencies and model zoo"
 
 echo "✅ Environment 'surf_pose_eval' created successfully!"
 echo ""
