@@ -67,7 +67,7 @@ class MMPoseWrapper(BasePoseModel):
             print(f"Initializing MMPose with device: {self.mmpose_device}")
             self.inferencer = MMPoseInferencer(
                 pose2d="human",
-                det_model="rtmdet-m_640-8xb32_coco-person",  # Explicit detection
+                # det_model="rtmdet-m_640-8xb32_coco-person",  # Explicit detection
                 device=self.mmpose_device,
             )
             self.is_initialized = True
@@ -85,7 +85,7 @@ class MMPoseWrapper(BasePoseModel):
                     print("🔄 Falling back to CPU...")
                     self.inferencer = MMPoseInferencer(
                         pose2d="human",
-                        det_model="rtmdet-m_640-8xb32_coco-person",
+                        # det_model="rtmdet-m_640-8xb32_coco-person",
                         device="cpu",
                     )
                     self.is_initialized = True
