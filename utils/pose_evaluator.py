@@ -162,10 +162,12 @@ class PoseEvaluator:
     def evaluate_models(
         self, models: List[str], max_clips: Optional[int] = None
     ) -> Dict:
-        """Evaluate multiple models with standard configuration"""
-        logging.info("Starting model evaluation")
+        """Evaluate multiple models with standard configuration (DEPRECATED - use centralized data selection)"""
+        logging.warning(
+            "evaluate_models() is deprecated - use centralized data selection instead"
+        )
 
-        # Load dataset
+        # Load dataset using legacy method
         video_format = self._get_video_format()
         logging.info(f"Using video format: {video_format}")
         maneuvers = self.data_loader.load_maneuvers(
@@ -186,7 +188,16 @@ class PoseEvaluator:
         return results
 
     def _evaluate_single_model(self, model_name: str, maneuvers: List) -> Dict:
-        """Evaluate a single pose estimation model"""
+        """Evaluate a single pose estimation model (legacy method)"""
+        return self._evaluate_single_model_with_data(model_name, maneuvers, None)
+
+    def _evaluate_single_model_with_data(
+        self,
+        model_name: str,
+        maneuvers: List,
+        visualization_manifest_path: Optional[str] = None,
+    ) -> Dict:
+        """Evaluate a single pose estimation model with pre-selected data"""
         # Load model configuration
         model_config_path = f"configs/model_configs/{model_name}.yaml"
         if Path(model_config_path).exists():
@@ -206,9 +217,14 @@ class PoseEvaluator:
         # Run evaluation
         result = self._evaluate_model_internal(model, model_name, maneuvers)
 
-        # Generate visualizations if enabled
-        if self.config.get("output", {}).get("visualization", {}).get("enabled", False):
-            self._create_sample_visualizations(model, model_name, maneuvers[:3])
+        # Generate visualizations if enabled and manifest provided
+        if (
+            self.config.get("output", {}).get("visualization", {}).get("enabled", False)
+            and visualization_manifest_path
+        ):
+            self._create_sample_visualizations_from_manifest(
+                model, model_name, visualization_manifest_path
+            )
 
         return result
 
@@ -546,10 +562,14 @@ class PoseEvaluator:
         return aggregated
 
     def _create_sample_visualizations(self, model, model_name: str, maneuvers: List):
-        """Create sample visualization videos"""
+        """Create sample visualization videos (DEPRECATED - use manifest-based selection)"""
+        logging.warning(
+            "_create_sample_visualizations() is deprecated - use manifest-based visualization selection"
+        )
+
         from utils.pose_video_visualizer import PoseVideoVisualizer
 
-        logging.info(f"Creating sample visualizations for {model_name}")
+        logging.info(f"Creating sample visualizations for {model_name} (legacy method)")
 
         # Get visualization config
         viz_config = self.config.get("output", {}).get("visualization", {})
@@ -620,7 +640,146 @@ class PoseEvaluator:
             except Exception as e:
                 logging.error(f"Error creating visualization for maneuver {i}: {e}")
 
-        logging.info(f"Created {created_count} visualization videos for {model_name}")
+        logging.info(
+            f"Created {created_count} visualization videos for {model_name} (legacy method)"
+        )
+
+    def _create_sample_visualizations_from_manifest(
+        self, model, model_name: str, visualization_manifest_path: str
+    ):
+        """Create sample visualization videos using pre-selected maneuvers from manifest"""
+        from utils.pose_video_visualizer import PoseVideoVisualizer
+        from utils.data_selection_manager import DataSelectionManager
+
+        logging.info(
+            f"Creating visualizations for {model_name} from manifest selection"
+        )
+
+        # Load visualization manifest
+        try:
+            viz_manifest = DataSelectionManager.load_selection_manifest(
+                visualization_manifest_path
+            )
+        except Exception as e:
+            logging.error(f"Failed to load visualization manifest: {e}")
+            return
+
+        # Get output directory from run manager
+        viz_dir = None
+        if hasattr(self, "run_manager") and self.run_manager:
+            viz_dir = self.run_manager.visualizations_dir
+        else:
+            viz_config = self.config.get("output", {}).get("visualization", {})
+            viz_dir = Path(viz_config.get("shared_storage_path", "./visualizations"))
+
+        viz_dir = Path(viz_dir)
+        viz_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize visualizer
+        viz_config = self.config.get("output", {}).get("visualization", {})
+        encoding_config = viz_config.get("encoding", {})
+        visualizer = PoseVideoVisualizer(encoding_config)
+
+        created_count = 0
+        selected_maneuvers = viz_manifest["selected_maneuvers"]
+
+        for maneuver_data in selected_maneuvers:
+            try:
+                # Create maneuver object from manifest data
+                source_clip = maneuver_data["source_clip"]
+
+                # Create a minimal VideoClip object
+                from data_handling.data_loader import VideoClip, Maneuver
+
+                clip = VideoClip(
+                    file_path=source_clip["video_path"],
+                    video_id=source_clip["clip_id"],
+                    camera=source_clip["clip_id"].split("_")[0]
+                    + "_"
+                    + source_clip["clip_id"].split("_")[1],
+                    session="_".join(source_clip["clip_id"].split("_")[2:4]),
+                    duration=source_clip["video_metadata"]["duration"],
+                    fps=source_clip["video_metadata"]["fps"],
+                    width=source_clip["video_metadata"]["width"],
+                    height=source_clip["video_metadata"]["height"],
+                    format=viz_manifest["selection_metadata"].get(
+                        "video_format", "h264"
+                    ),
+                    zoom_level=source_clip["clip_id"].split("_")[-1],
+                    base_clip_id="_".join(source_clip["clip_id"].split("_")[4:-1]),
+                    annotations=[],
+                )
+
+                # Create maneuver object
+                maneuver = Maneuver(
+                    clip=clip,
+                    maneuver_id=maneuver_data["maneuver_id"],
+                    maneuver_type=maneuver_data["maneuver_type"],
+                    execution_score=maneuver_data["execution_score"],
+                    start_time=maneuver_data["start_time"],
+                    end_time=maneuver_data["end_time"],
+                    start_frame=maneuver_data["start_frame"],
+                    end_frame=maneuver_data["end_frame"],
+                    annotation_data=maneuver_data["annotation_data"],
+                )
+
+                # Generate pose predictions for this maneuver
+                pose_results = self._generate_pose_predictions(model, maneuver)
+
+                if not pose_results:
+                    logging.warning(
+                        f"No pose prediction data for maneuver {maneuver.maneuver_id}, skipping visualization"
+                    )
+                    continue
+
+                # Create output filename based on maneuver details
+                video_stem = Path(maneuver.file_path).stem
+                maneuver_type_clean = maneuver.maneuver_type.replace("-", "_").replace(
+                    " ", "_"
+                )
+                output_filename = (
+                    f"{model_name}_{video_stem}_{maneuver_type_clean}_visualization.mp4"
+                )
+                output_path = viz_dir / output_filename
+
+                # Create visualization video
+                success = visualizer.create_pose_visualization_video(
+                    video_path=maneuver.file_path,
+                    pose_results=pose_results,
+                    output_path=str(output_path),
+                    model_name=model_name,
+                    maneuver_start_frame=maneuver.start_frame,
+                    maneuver_end_frame=maneuver.end_frame,
+                )
+
+                if success:
+                    created_count += 1
+
+                    # Calculate detection stats for this video
+                    frames_with_detections = sum(
+                        1 for result in pose_results if result.get("num_persons", 0) > 0
+                    )
+                    detection_rate = (
+                        frames_with_detections / len(pose_results) * 100
+                        if pose_results
+                        else 0
+                    )
+
+                    logging.info(
+                        f"Created visualization {created_count}: {output_filename} "
+                        f"({detection_rate:.1f}% detection rate, {maneuver.maneuver_type})"
+                    )
+                else:
+                    logging.warning(
+                        f"Failed to create visualization for {maneuver.maneuver_id}"
+                    )
+
+            except Exception as e:
+                logging.error(f"Error creating visualization for maneuver: {e}")
+
+        logging.info(
+            f"Created {created_count} visualization videos for {model_name} from manifest selection"
+        )
 
     def _generate_pose_predictions(self, model, maneuver) -> List[Dict]:
         """Generate pose predictions for a maneuver for visualization"""

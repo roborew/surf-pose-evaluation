@@ -65,13 +65,13 @@ class OptunaPoseOptimizer:
                     mlflow.set_tag("trial_status", "initialization_failed")
                     return 0.0
 
-                # Quick evaluation on subset
-                subset_maneuvers = maneuvers[: min(20, len(maneuvers))]
+                # Use pre-selected maneuvers (already optimized subset)
                 trial_metrics = []
 
                 print(f"\n🔄 Trial {trial.number:03d}: {param_summary}")
+                print(f"   • Using {len(maneuvers)} pre-selected maneuvers")
 
-                for i, maneuver in enumerate(subset_maneuvers):
+                for i, maneuver in enumerate(maneuvers):
                     try:
                         maneuver_metrics = self.evaluator._process_video_maneuver(
                             model, maneuver, model_name
@@ -82,7 +82,7 @@ class OptunaPoseOptimizer:
 
                         if (i + 1) % 5 == 0:
                             print(
-                                f"   • Processed {i + 1}/{len(subset_maneuvers)} maneuvers..."
+                                f"   • Processed {i + 1}/{len(maneuvers)} maneuvers..."
                             )
 
                     except Exception as e:

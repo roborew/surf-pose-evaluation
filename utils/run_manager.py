@@ -67,6 +67,7 @@ class RunManager:
         self.visualizations_dir = self.run_dir / "visualizations"
         self.best_params_dir = self.run_dir / "best_params"
         self.reports_dir = self.run_dir / "reports"
+        self.data_selections_dir = self.run_dir / "data_selections"
 
         # Create directories
         self._create_directories()
@@ -78,6 +79,9 @@ class RunManager:
         logger.info(f"📁 Run directory: {self.run_dir}")
         logger.info(f"🔗 Shared results location: {self.base_results_dir}")
 
+        # Initialize data selections tracking
+        self.data_selection_manifests = {}
+
     def _create_directories(self):
         """Create all run-specific directories"""
         directories = [
@@ -87,6 +91,7 @@ class RunManager:
             self.visualizations_dir,
             self.best_params_dir,
             self.reports_dir,
+            self.data_selections_dir,
         ]
 
         for directory in directories:
@@ -110,6 +115,7 @@ class RunManager:
                 "visualizations_dir": str(self.visualizations_dir),
                 "best_params_dir": str(self.best_params_dir),
                 "reports_dir": str(self.reports_dir),
+                "data_selections_dir": str(self.data_selections_dir),
             },
         }
 
@@ -253,6 +259,117 @@ class RunManager:
         logger.info(f"📄 Created {phase} config: {config_path}")
         return str(config_path)
 
+    def generate_data_selections(
+        self,
+        config: Dict[str, Any],
+        optuna_max_clips: Optional[int] = None,
+        comparison_max_clips: Optional[int] = None,
+    ) -> Dict[str, str]:
+        """Generate data selection manifests for this run
+
+        Args:
+            config: Complete evaluation configuration
+            optuna_max_clips: Max clips for Optuna phase
+            comparison_max_clips: Max clips for comparison phase
+
+        Returns:
+            Dictionary mapping phase names to manifest file paths
+        """
+        from utils.data_selection_manager import DataSelectionManager
+
+        logger.info("🎯 Generating data selection manifests for run")
+
+        # Initialize data selection manager
+        selection_manager = DataSelectionManager(config, run_manager=self)
+
+        # Generate phase selections
+        manifest_paths = selection_manager.generate_phase_selections(
+            optuna_max_clips=optuna_max_clips,
+            comparison_max_clips=comparison_max_clips,
+            random_seed=config.get("data_source", {})
+            .get("splits", {})
+            .get("random_seed", 42),
+            video_format=config.get("data_source", {})
+            .get("video_clips", {})
+            .get("input_format", "h264"),
+        )
+
+        # Store manifest paths in run manager
+        self.data_selection_manifests.update(manifest_paths)
+
+        # Update run metadata with selection info
+        self._update_run_metadata_with_selections(manifest_paths)
+
+        logger.info(f"✅ Generated {len(manifest_paths)} data selection manifests")
+        return manifest_paths
+
+    def _update_run_metadata_with_selections(self, manifest_paths: Dict[str, str]):
+        """Update run metadata file with data selection information
+
+        Args:
+            manifest_paths: Dictionary mapping phase names to manifest paths
+        """
+        metadata_file = self.run_dir / "run_metadata.json"
+
+        try:
+            # Load existing metadata
+            with open(metadata_file, "r") as f:
+                metadata = json.load(f)
+
+            # Add data selection information
+            metadata["data_selections"] = {
+                "enabled": True,
+                "manifest_files": manifest_paths,
+                "selection_dir": str(self.data_selections_dir),
+            }
+
+            # Save updated metadata
+            with open(metadata_file, "w") as f:
+                json.dump(metadata, f, indent=2)
+
+            logger.info(f"📋 Updated run metadata with data selection info")
+
+        except Exception as e:
+            logger.warning(f"Failed to update run metadata with selections: {e}")
+
+    def get_data_selection_manifest(self, phase: str) -> Optional[str]:
+        """Get path to data selection manifest for a phase
+
+        Args:
+            phase: Phase name (optuna/comparison/visualization)
+
+        Returns:
+            Path to manifest file or None if not found
+        """
+        return self.data_selection_manifests.get(phase)
+
+    def print_data_selection_summary(self):
+        """Print summary of data selections for this run"""
+        if not self.data_selection_manifests:
+            print("   📊 Data Selections: None generated")
+            return
+
+        print(f"   📊 Data Selections:")
+        for phase, manifest_path in self.data_selection_manifests.items():
+            try:
+                from utils.data_selection_manager import DataSelectionManager
+
+                manager = DataSelectionManager({}, run_manager=self)
+                summary = manager.get_manifest_summary(manifest_path)
+                # Extract key stats from summary
+                lines = summary.split("\n")
+                clips_line = next((line for line in lines if "• Clips:" in line), "")
+                maneuvers_line = next(
+                    (line for line in lines if "• Maneuvers:" in line), ""
+                )
+                print(
+                    f"     • {phase.title()}: {clips_line.strip().replace('• ', '')} | {maneuvers_line.strip().replace('• ', '')}"
+                )
+            except Exception as e:
+                print(
+                    f"     • {phase.title()}: manifest available ({Path(manifest_path).name})"
+                )
+
     @staticmethod
     def list_previous_runs() -> List[Dict[str, Any]]:
         """List all previous runs with metadata"""
@@ -335,6 +452,7 @@ class RunManager:
         print(f"   MLflow: {self.mlflow_dir}")
         print(f"   Predictions: {self.predictions_dir}")
         print(f"   Visualizations: {self.visualizations_dir}")
+        self.print_data_selection_summary()
 
     @staticmethod
     def get_shared_mlflow_uri() -> str:

@@ -37,8 +37,8 @@ dependencies:
       # OpenCV via pip (works better than conda on macOS)
       - opencv-python==4.8.0.76
 
-      # MLflow and experiment tracking
-      - mlflow==2.5.0
+      # MLflow and experiment tracking (match production version)
+      - mlflow==3.1.2
       - optuna==3.2.0
 
       # MediaPipe (use latest version - 0.10.21 confirmed working on Apple Silicon)

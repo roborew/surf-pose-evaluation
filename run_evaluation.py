@@ -81,8 +81,8 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def run_optuna_phase(run_manager: RunManager, args) -> Dict:
-    """Run Optuna optimization phase"""
+def run_optuna_phase(run_manager: RunManager, args, optuna_maneuvers: List) -> Dict:
+    """Run Optuna optimization phase with pre-selected data"""
     logger = logging.getLogger(__name__)
 
     logger.info("🔍 Starting Optuna optimization phase...")
@@ -96,28 +96,24 @@ def run_optuna_phase(run_manager: RunManager, args) -> Dict:
     with open(optuna_config_path, "r") as f:
         config = yaml.safe_load(f)
 
-    # Initialize optimizer
+    # Initialize optimizer with pre-selected data
     optimizer = OptunaPoseOptimizer(config, run_manager)
 
-    # Load dataset
-    evaluator = PoseEvaluator(config)
-    evaluator.run_manager = run_manager  # Set run manager for visualizations
-    maneuvers = evaluator.data_loader.load_maneuvers(
-        max_clips=args.max_clips,
-        video_format=config["data_source"]["video_clips"].get("input_format", "h264"),
+    logger.info(
+        f"Using pre-selected {len(optuna_maneuvers)} maneuvers for optimization"
     )
-
-    logger.info(f"Loaded {len(maneuvers)} maneuvers for optimization")
 
     # Run optimization for each model
     results = {}
     for model_name in args.models:
-        if model_name not in evaluator.get_available_models():
+        # Check model availability using a temporary evaluator
+        temp_evaluator = PoseEvaluator(config)
+        if model_name not in temp_evaluator.get_available_models():
             logger.warning(f"Model {model_name} not available, skipping")
             continue
 
         logger.info(f"Optimizing {model_name}")
-        model_result = optimizer.optimize_model(model_name, maneuvers)
+        model_result = optimizer.optimize_model(model_name, optuna_maneuvers)
         results[model_name] = model_result
 
     # Save best parameters
@@ -130,8 +126,13 @@ def run_optuna_phase(run_manager: RunManager, args) -> Dict:
 # The extract_best_parameters function has been moved to OptunaPoseOptimizer class
 
 
-def run_comparison_phase(run_manager: RunManager, args) -> Dict:
-    """Run comprehensive comparison phase"""
+def run_comparison_phase(
+    run_manager: RunManager,
+    args,
+    comparison_maneuvers: List,
+    visualization_manifest_path: str,
+) -> Dict:
+    """Run comprehensive comparison phase with pre-selected data"""
     logger = logging.getLogger(__name__)
 
     logger.info("📊 Starting comprehensive comparison phase...")
@@ -164,9 +165,13 @@ def run_comparison_phase(run_manager: RunManager, args) -> Dict:
         # Fix config before initializing evaluator
         config["data_source"]["video_clips"]["input_format"] = video_format_override
 
-    # Initialize evaluator
+    # Initialize evaluator with pre-selected data
     evaluator = PoseEvaluator(config)
     evaluator.run_manager = run_manager  # Set run manager for visualizations
+
+    logger.info(
+        f"Using pre-selected {len(comparison_maneuvers)} maneuvers for comparison"
+    )
 
     # Run evaluation for each model with MLflow logging
     results = {}
@@ -185,12 +190,9 @@ def run_comparison_phase(run_manager: RunManager, args) -> Dict:
             mlflow.log_param("phase", "comparison")
             mlflow.log_param("max_clips", args.max_clips)
 
-            # Run single model evaluation
-            model_result = evaluator._evaluate_single_model(
-                model_name,
-                evaluator.data_loader.load_maneuvers(
-                    max_clips=args.max_clips, video_format=evaluator._get_video_format()
-                ),
+            # Run single model evaluation with pre-selected data
+            model_result = evaluator._evaluate_single_model_with_data(
+                model_name, comparison_maneuvers, visualization_manifest_path
             )
 
             # Log metrics to MLflow - Fix: Access metrics correctly
@@ -209,7 +211,9 @@ def run_comparison_phase(run_manager: RunManager, args) -> Dict:
     return {"config_path": comparison_config_path, "results": results}
 
 
-def generate_summary_report(run_manager: RunManager, models: list, max_clips: int = None):
+def generate_summary_report(
+    run_manager: RunManager, models: list, max_clips: int = None
+):
     """Generate a summary report comparing the results"""
     logger = logging.getLogger(__name__)
     logger.info("📋 Generating summary report")
@@ -361,27 +365,84 @@ def main():
     success = True
 
     try:
+        # Generate centralized data selections ONCE for all phases
+        logger.info("🎯 Generating centralized data selections...")
+
+        # Load base config to determine proper max_clips for each phase
+        with open(args.config, "r") as f:
+            base_config = yaml.safe_load(f)
+
+        # Generate data selection manifests
+        manifest_paths = run_manager.generate_data_selections(
+            config=base_config,
+            optuna_max_clips=args.max_clips,  # Smaller subset for Optuna
+            comparison_max_clips=args.max_clips,  # Full requested set for comparison
+        )
+
+        # Load pre-selected data from manifests
+        optuna_maneuvers = []
+        comparison_maneuvers = []
+        visualization_manifest_path = None
+
+        if manifest_paths.get("optuna"):
+            from data_handling.data_loader import SurfingDataLoader
+
+            temp_loader = SurfingDataLoader(base_config)
+            optuna_maneuvers = temp_loader.load_maneuvers_from_manifest(
+                manifest_paths["optuna"]
+            )
+            logger.info(f"📖 Loaded {len(optuna_maneuvers)} maneuvers for Optuna phase")
+
+        if manifest_paths.get("comparison"):
+            from data_handling.data_loader import SurfingDataLoader
+
+            temp_loader = SurfingDataLoader(base_config)
+            comparison_maneuvers = temp_loader.load_maneuvers_from_manifest(
+                manifest_paths["comparison"]
+            )
+            logger.info(
+                f"📖 Loaded {len(comparison_maneuvers)} maneuvers for comparison phase"
+            )
+
+        if manifest_paths.get("visualization"):
+            visualization_manifest_path = manifest_paths["visualization"]
+            logger.info(
+                f"📖 Visualization manifest ready: {Path(visualization_manifest_path).name}"
+            )
+
         # Phase 1: Optuna Optimization
         if not args.skip_optuna and not args.comparison_only:
-            optuna_result = run_optuna_phase(run_manager, args)
-            results["optuna_phase"] = "completed"
-            results["configs_used"].append(optuna_result["config_path"])
-            results["optuna_results"] = optuna_result["results"]
+            if optuna_maneuvers:
+                optuna_result = run_optuna_phase(run_manager, args, optuna_maneuvers)
+                results["optuna_phase"] = "completed"
+                results["configs_used"].append(optuna_result["config_path"])
+                results["optuna_results"] = optuna_result["results"]
+            else:
+                logger.warning("⚠️ No Optuna data available, skipping optimization")
+                results["optuna_phase"] = "skipped"
         else:
             logger.info("⏭️ Skipping Optuna optimization phase")
             results["optuna_phase"] = "skipped"
 
         # Phase 2: Comprehensive Comparison
         if not args.skip_comparison and not args.optuna_only:
-            comparison_result = run_comparison_phase(run_manager, args)
-            results["comparison_phase"] = "completed"
-            results["configs_used"].append(comparison_result["config_path"])
-            results["comparison_results"] = comparison_result["results"]
+            if comparison_maneuvers:
+                comparison_result = run_comparison_phase(
+                    run_manager, args, comparison_maneuvers, visualization_manifest_path
+                )
+                results["comparison_phase"] = "completed"
+                results["configs_used"].append(comparison_result["config_path"])
+                results["comparison_results"] = comparison_result["results"]
 
-            # Generate summary report
-            if not generate_summary_report(run_manager, args.models, args.max_clips):
-                logger.error("❌ Failed at summary generation phase")
-                success = False
+                # Generate summary report
+                if not generate_summary_report(
+                    run_manager, args.models, args.max_clips
+                ):
+                    logger.error("❌ Failed at summary generation phase")
+                    success = False
+            else:
+                logger.warning("⚠️ No comparison data available, skipping comparison")
+                results["comparison_phase"] = "skipped"
         else:
             logger.info("⏭️ Skipping comparison phase")
             results["comparison_phase"] = "skipped"

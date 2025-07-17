@@ -836,6 +836,65 @@ class SurfingDataLoader:
         logger.info(f"Loaded {len(all_maneuvers)} maneuvers from {len(clips)} clips")
         return all_maneuvers
 
+    def load_maneuvers_from_manifest(self, manifest_path: str) -> List[Maneuver]:
+        """Load maneuvers from a selection manifest file
+        
+        Args:
+            manifest_path: Path to selection manifest JSON file
+            
+        Returns:
+            List of Maneuver objects loaded from manifest
+        """
+        try:
+            with open(manifest_path, 'r') as f:
+                manifest = json.load(f)
+            
+            logger.info(f"📖 Loading maneuvers from manifest: {manifest_path}")
+            
+            maneuvers = []
+            
+            for clip_data in manifest["selected_clips"]:
+                # Create a simplified VideoClip object from manifest data
+                video_metadata = clip_data["video_metadata"]
+                
+                # Create clip object with manifest data
+                clip = VideoClip(
+                    file_path=clip_data["video_path"],
+                    video_id=clip_data["clip_id"],
+                    camera=clip_data["camera"],
+                    session=clip_data["session"],
+                    duration=video_metadata.get("duration", 0),
+                    fps=video_metadata.get("fps", 25.0),
+                    width=video_metadata.get("width", 1920),
+                    height=video_metadata.get("height", 1080),
+                    format=manifest["selection_metadata"]["video_format"],
+                    zoom_level=clip_data["zoom_level"],
+                    base_clip_id=clip_data["base_clip_id"],
+                    annotations=[]  # Annotations handled in maneuver objects
+                )
+                
+                # Create maneuver objects from manifest data
+                for maneuver_data in clip_data["maneuvers"]:
+                    maneuver = Maneuver(
+                        clip=clip,
+                        maneuver_id=maneuver_data["maneuver_id"],
+                        maneuver_type=maneuver_data["maneuver_type"],
+                        execution_score=maneuver_data["execution_score"],
+                        start_time=maneuver_data["start_time"],
+                        end_time=maneuver_data["end_time"],
+                        start_frame=maneuver_data["start_frame"],
+                        end_frame=maneuver_data["end_frame"],
+                        annotation_data=maneuver_data["annotation_data"]
+                    )
+                    maneuvers.append(maneuver)
+            
+            logger.info(f"✅ Loaded {len(maneuvers)} maneuvers from {len(manifest['selected_clips'])} clips")
+            return maneuvers
+            
+        except Exception as e:
+            logger.error(f"Failed to load maneuvers from manifest {manifest_path}: {e}")
+            raise
+
     def load_video_frames(
         self, clip_or_maneuver, start_frame: int = 0, end_frame: Optional[int] = None
     ) -> np.ndarray:
