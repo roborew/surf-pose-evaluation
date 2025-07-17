@@ -209,7 +209,7 @@ def run_comparison_phase(run_manager: RunManager, args) -> Dict:
     return {"config_path": comparison_config_path, "results": results}
 
 
-def generate_summary_report(run_manager: RunManager, models: list):
+def generate_summary_report(run_manager: RunManager, models: list, max_clips: int = None):
     """Generate a summary report comparing the results"""
     logger = logging.getLogger(__name__)
     logger.info("📋 Generating summary report")
@@ -270,7 +270,7 @@ def generate_summary_report(run_manager: RunManager, models: list):
         summary = {
             "evaluation_date": datetime.now().isoformat(),
             "models_evaluated": models,
-            "dataset_size": args.max_clips or "full",
+            "dataset_size": max_clips or "full",
             "results": [],
         }
 
@@ -379,7 +379,7 @@ def main():
             results["comparison_results"] = comparison_result["results"]
 
             # Generate summary report
-            if not generate_summary_report(run_manager, args.models):
+            if not generate_summary_report(run_manager, args.models, args.max_clips):
                 logger.error("❌ Failed at summary generation phase")
                 success = False
         else:
