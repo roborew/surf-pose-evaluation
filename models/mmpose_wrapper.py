@@ -3,6 +3,7 @@ MMPose wrapper for pose estimation - Simplified approach based on working implem
 """
 
 import time
+import torch
 from typing import Dict, List, Any, Optional
 import numpy as np
 import cv2
