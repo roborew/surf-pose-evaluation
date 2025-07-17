@@ -38,10 +38,11 @@ class MMPoseWrapper(BasePoseModel):
         self.kpt_thr = kwargs.get("kpt_thr", 0.3)
         self.bbox_thr = kwargs.get("bbox_thr", 0.3)
 
-        # Smart device selection with MPS override
+        # Smart device selection with MPS override for MMPose/MMDetection compatibility
         self.requested_device = device
-        if device == "cuda":
-            self.mmpose_device = "cuda"  # Use CUDA when available
+        if device == "cuda" and torch.cuda.is_available():
+            self.mmpose_device = "cuda"
+            print(f"🚀 MMPose will use CUDA (GPU acceleration)")
         elif device == "mps":
             # MMPose/MMDetection NMS operations don't support MPS yet
             # Fall back to CPU while logging the override
@@ -52,66 +53,51 @@ class MMPoseWrapper(BasePoseModel):
             print("   → Using CPU instead. Other models will still use MPS.")
         else:
             self.mmpose_device = "cpu"
+            if device not in ["cpu", "mps"]:
+                print(f"⚠️  Requested device '{device}' not available, using CPU")
 
         self.inferencer = None
         self.load_model()
 
     def load_model(self) -> None:
-        """Load MMPose inferencer with CUDA-first approach"""
+        """Load MMPose inferencer with proper device and fallback"""
         try:
-            # Try different initialization approaches for robustness
-            initialization_methods = [
-                # Method 1: Standard initialization
-                lambda: MMPoseInferencer("human", device=self.mmpose_device),
-                # Method 2: Explicit pose model without detection
-                lambda: MMPoseInferencer(
-                    pose2d="rtmpose-m_simcc-body7_pt-body7_420e-256x192",
-                    device=self.mmpose_device,
-                ),
-                # Method 3: Use CPU fallback if CUDA fails
-                lambda: (
-                    MMPoseInferencer("human", device="cpu")
-                    if self.mmpose_device == "cuda"
-                    else None
-                ),
-            ]
-
-            for i, init_method in enumerate(initialization_methods):
-                try:
-                    if init_method is not None:
-                        self.inferencer = init_method()
-                        self.is_initialized = True
-
-                        if self.mmpose_device == "cuda":
-                            print(
-                                f"MMPose initialized with CUDA acceleration on {self.mmpose_device} (method {i+1})"
-                            )
-                        else:
-                            print(
-                                f"MMPose initialized on {self.mmpose_device} (method {i+1})"
-                            )
-                        return
-
-                except Exception as method_error:
-                    print(f"MMPose initialization method {i+1} failed: {method_error}")
-                    continue
-
-            # If all methods failed, try the most basic approach
-            print(
-                "All standard initialization methods failed, trying basic approach..."
-            )
+            # Primary: Use "human" preset with requested device
+            print(f"Initializing MMPose with device: {self.mmpose_device}")
             self.inferencer = MMPoseInferencer(
-                pose2d="rtmpose-m_simcc-body7_pt-body7_420e-256x192",
-                det_model=None,  # Skip detection model entirely
-                device="cpu",
+                pose2d="human",
+                det_model="rtmdet-m_640-8xb32_coco-person",  # Explicit detection
+                device=self.mmpose_device,
             )
             self.is_initialized = True
-            print("MMPose initialized with basic approach (CPU only, no detection)")
+            print(f"✅ MMPose initialized successfully on {self.mmpose_device}")
+            return
 
-        except Exception as e:
-            print(f"All MMPose initialization methods failed. Final error: {e}")
+        except Exception as primary_error:
+            print(
+                f"⚠️  MMPose initialization failed on {self.mmpose_device}: {primary_error}"
+            )
+
+            # Fallback: Try CPU if primary device failed
+            if self.mmpose_device != "cpu":
+                try:
+                    print("🔄 Falling back to CPU...")
+                    self.inferencer = MMPoseInferencer(
+                        pose2d="human",
+                        det_model="rtmdet-m_640-8xb32_coco-person",
+                        device="cpu",
+                    )
+                    self.is_initialized = True
+                    print("✅ MMPose initialized successfully on CPU (fallback)")
+                    return
+
+                except Exception as fallback_error:
+                    print(f"❌ CPU fallback also failed: {fallback_error}")
+
+            # Final error
             raise RuntimeError(
-                f"Failed to initialize MMPose after trying all methods: {e}"
+                f"Failed to initialize MMPose on both {self.mmpose_device} and CPU. "
+                f"Primary error: {primary_error}"
             )
 
     def predict(self, image: np.ndarray) -> Dict[str, Any]:
