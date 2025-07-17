@@ -312,13 +312,24 @@ def generate_summary_report(
 
         for result in summary["results"]:
             print(f"\n📍 {result['model'].upper()}")
+            
+            # Handle None values safely
+            pck_error = result['accuracy']['pck_error_mean']
+            detection_f1 = result['accuracy']['detection_f1']
+            fps = result['performance']['fps_mean']
+            inference_time = result['performance']['inference_time_ms']
+            
             print(
-                f"   • Accuracy (PCK Error): {result['accuracy']['pck_error_mean']:.4f}"
+                f"   • Accuracy (PCK Error): {pck_error:.4f}" if pck_error is not None else "   • Accuracy (PCK Error): N/A"
             )
-            print(f"   • Detection F1: {result['accuracy']['detection_f1']:.4f}")
-            print(f"   • Speed (FPS): {result['performance']['fps_mean']:.2f}")
             print(
-                f"   • Inference Time: {result['performance']['inference_time_ms']:.2f}ms"
+                f"   • Detection F1: {detection_f1:.4f}" if detection_f1 is not None else "   • Detection F1: N/A"
+            )
+            print(
+                f"   • Speed (FPS): {fps:.2f}" if fps is not None else "   • Speed (FPS): N/A"
+            )
+            print(
+                f"   • Inference Time: {inference_time:.2f}ms" if inference_time is not None else "   • Inference Time: N/A"
             )
 
         return True
