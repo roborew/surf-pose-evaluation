@@ -191,7 +191,7 @@ def run_comparison_phase(
             mlflow.log_param("max_clips", args.max_clips)
 
             # Run single model evaluation with pre-selected data
-            model_result = evaluator._evaluate_single_model_with_data(
+            model_result = evaluator.evaluate_single_model_with_data(
                 model_name, comparison_maneuvers, visualization_manifest_path
             )
 

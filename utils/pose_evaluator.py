@@ -153,45 +153,7 @@ class PoseEvaluator:
         """Get list of available model names"""
         return list(self.model_registry.keys())
 
-    def _get_video_format(self) -> str:
-        """Get video format to use, with command-line override support"""
-        if self.video_format_override:
-            return self.video_format_override
-        return self.config["data_source"]["video_clips"].get("input_format", "h264")
-
-    def evaluate_models(
-        self, models: List[str], max_clips: Optional[int] = None
-    ) -> Dict:
-        """Evaluate multiple models with standard configuration (DEPRECATED - use centralized data selection)"""
-        logging.warning(
-            "evaluate_models() is deprecated - use centralized data selection instead"
-        )
-
-        # Load dataset using legacy method
-        video_format = self._get_video_format()
-        logging.info(f"Using video format: {video_format}")
-        maneuvers = self.data_loader.load_maneuvers(
-            max_clips=max_clips, video_format=video_format
-        )
-        logging.info(f"Loaded {len(maneuvers)} maneuvers for evaluation")
-
-        results = {}
-        for model_name in models:
-            if model_name not in self.model_registry:
-                logging.warning(f"Model {model_name} not available, skipping")
-                continue
-
-            logging.info(f"Evaluating {model_name}")
-            model_results = self._evaluate_single_model(model_name, maneuvers)
-            results[model_name] = model_results
-
-        return results
-
-    def _evaluate_single_model(self, model_name: str, maneuvers: List) -> Dict:
-        """Evaluate a single pose estimation model (legacy method)"""
-        return self._evaluate_single_model_with_data(model_name, maneuvers, None)
-
-    def _evaluate_single_model_with_data(
+    def evaluate_single_model_with_data(
         self,
         model_name: str,
         maneuvers: List,
@@ -560,89 +522,6 @@ class PoseEvaluator:
                     aggregated[f"perf_{key}_std"] = np.std(numeric_values)
 
         return aggregated
-
-    def _create_sample_visualizations(self, model, model_name: str, maneuvers: List):
-        """Create sample visualization videos (DEPRECATED - use manifest-based selection)"""
-        logging.warning(
-            "_create_sample_visualizations() is deprecated - use manifest-based visualization selection"
-        )
-
-        from utils.pose_video_visualizer import PoseVideoVisualizer
-
-        logging.info(f"Creating sample visualizations for {model_name} (legacy method)")
-
-        # Get visualization config
-        viz_config = self.config.get("output", {}).get("visualization", {})
-        max_examples = viz_config.get("max_examples_per_model", 3)
-
-        # Get output directory from run manager if available
-        viz_dir = None
-        if hasattr(self, "run_manager") and self.run_manager:
-            viz_dir = self.run_manager.visualizations_dir
-        else:
-            # Fallback to config path
-            viz_dir = Path(viz_config.get("shared_storage_path", "./visualizations"))
-
-        viz_dir = Path(viz_dir)
-        viz_dir.mkdir(parents=True, exist_ok=True)
-
-        # Initialize visualizer
-        encoding_config = viz_config.get("encoding", {})
-        visualizer = PoseVideoVisualizer(encoding_config)
-
-        created_count = 0
-        for i, maneuver in enumerate(maneuvers[:max_examples]):
-            try:
-                # Generate pose predictions for this maneuver
-                pose_results = self._generate_pose_predictions(model, maneuver)
-
-                if not pose_results:
-                    logging.warning(
-                        f"No pose prediction data for maneuver {i}, skipping visualization"
-                    )
-                    continue
-
-                # Create output filename
-                video_stem = Path(maneuver.file_path).stem
-                output_filename = f"{model_name}_{video_stem}_visualization.mp4"
-                output_path = viz_dir / output_filename
-
-                # Create visualization video (will show video even with no pose detections)
-                success = visualizer.create_pose_visualization_video(
-                    video_path=maneuver.file_path,
-                    pose_results=pose_results,
-                    output_path=str(output_path),
-                    model_name=model_name,
-                    maneuver_start_frame=maneuver.start_frame,
-                    maneuver_end_frame=maneuver.end_frame,
-                )
-
-                if success:
-                    created_count += 1
-
-                    # Calculate detection stats for this video
-                    frames_with_detections = sum(
-                        1 for result in pose_results if result.get("num_persons", 0) > 0
-                    )
-                    detection_rate = (
-                        frames_with_detections / len(pose_results) * 100
-                        if pose_results
-                        else 0
-                    )
-
-                    logging.info(
-                        f"Created visualization {created_count}: {output_filename} "
-                        f"({detection_rate:.1f}% detection rate)"
-                    )
-                else:
-                    logging.warning(f"Failed to create visualization for {video_stem}")
-
-            except Exception as e:
-                logging.error(f"Error creating visualization for maneuver {i}: {e}")
-
-        logging.info(
-            f"Created {created_count} visualization videos for {model_name} (legacy method)"
-        )
 
     def _create_sample_visualizations_from_manifest(
         self, model, model_name: str, visualization_manifest_path: str

@@ -702,161 +702,27 @@ class SurfingDataLoader:
 
         return self.data_splits
 
-    def get_evaluation_subset(
-        self,
-        split: str = "test",
-        max_clips: Optional[int] = None,
-        max_duration: Optional[float] = None,
-        cameras: Optional[List[str]] = None,
-        sessions: Optional[List[str]] = None,
-    ) -> List[VideoClip]:
-        """
-        Get a subset of clips for evaluation based on filters.
-
-        Args:
-            split: Data split to use ("train", "val", "test")
-            max_clips: Maximum number of clips to return
-            max_duration: Maximum duration per clip (in seconds)
-            cameras: List of cameras to include
-            sessions: List of sessions to include
-
-        Returns:
-            List of filtered VideoClip objects
-        """
-        if self.data_splits is None:
-            raise ValueError(
-                "Data splits not created. Call create_data_splits() first."
-            )
-
-        # Get clips from specified split
-        if split == "train":
-            clips = self.data_splits.train
-        elif split == "val":
-            clips = self.data_splits.val
-        elif split == "test":
-            clips = self.data_splits.test
-        else:
-            raise ValueError(f"Invalid split: {split}")
-
-        # Apply filters
-        filtered_clips = clips.copy()
-
-        if cameras:
-            filtered_clips = [c for c in filtered_clips if c.camera in cameras]
-
-        if sessions:
-            filtered_clips = [c for c in filtered_clips if c.session in sessions]
-
-        if max_duration:
-            filtered_clips = [c for c in filtered_clips if c.duration <= max_duration]
-
-        # Limit number of clips
-        if max_clips and len(filtered_clips) > max_clips:
-            random.shuffle(filtered_clips)
-            filtered_clips = filtered_clips[:max_clips]
-
-        logger.info(f"Selected {len(filtered_clips)} clips for evaluation")
-        return filtered_clips
-
-    def load_clips(
-        self,
-        max_clips: Optional[int] = None,
-        split: str = "test",
-        video_format: Optional[str] = None,
-    ) -> List[VideoClip]:
-        """
-        Load clips for evaluation - convenience method for the evaluation script.
-
-        Args:
-            max_clips: Maximum number of clips to load
-            split: Data split to use ("train", "val", "test")
-            video_format: Video format to use ("h264" or "ffv1"). If None, uses config setting.
-
-        Returns:
-            List of VideoClip objects ready for evaluation
-        """
-        # Use video format from config if not specified
-        if video_format is None:
-            video_format = self.video_clips_config.get("input_format", "h264")
-
-        # Initialize if not already done
-        if not self.all_clips:
-            logger.info("Loading annotations...")
-            self.load_annotations()
-
-            logger.info(f"Discovering {video_format} video clips...")
-            self.all_clips = self.discover_video_clips(video_format)
-
-            logger.info("Creating data splits...")
-            self.create_data_splits()
-
-        # Get clips for evaluation
-        clips = self.get_evaluation_subset(split=split, max_clips=max_clips)
-
-        return clips
-
-    def load_maneuvers(
-        self,
-        max_clips: Optional[int] = None,
-        split: str = "test",
-        video_format: Optional[str] = None,
-        maneuvers_per_clip: Optional[int] = None,
-    ) -> List[Maneuver]:
-        """
-        Load individual maneuvers for evaluation instead of full clips.
-
-        Args:
-            max_clips: Maximum number of clips to load maneuvers from
-            split: Data split to use ("train", "val", "test")
-            video_format: Video format to use ("h264" or "ffv1"). If None, uses config setting.
-            maneuvers_per_clip: Maximum maneuvers per clip (None for all)
-
-        Returns:
-            List of Maneuver objects ready for evaluation
-        """
-        # Get clips first
-        clips = self.load_clips(
-            max_clips=max_clips, split=split, video_format=video_format
-        )
-
-        # Extract maneuvers from clips
-        all_maneuvers = []
-        for clip in clips:
-            clip_maneuvers = clip.get_maneuvers()
-
-            # Limit maneuvers per clip if specified
-            if maneuvers_per_clip and len(clip_maneuvers) > maneuvers_per_clip:
-                # Randomly sample maneuvers
-                import random
-
-                clip_maneuvers = random.sample(clip_maneuvers, maneuvers_per_clip)
-
-            all_maneuvers.extend(clip_maneuvers)
-
-        logger.info(f"Loaded {len(all_maneuvers)} maneuvers from {len(clips)} clips")
-        return all_maneuvers
-
     def load_maneuvers_from_manifest(self, manifest_path: str) -> List[Maneuver]:
         """Load maneuvers from a selection manifest file
-        
+
         Args:
             manifest_path: Path to selection manifest JSON file
-            
+
         Returns:
             List of Maneuver objects loaded from manifest
         """
         try:
-            with open(manifest_path, 'r') as f:
+            with open(manifest_path, "r") as f:
                 manifest = json.load(f)
-            
+
             logger.info(f"📖 Loading maneuvers from manifest: {manifest_path}")
-            
+
             maneuvers = []
-            
+
             for clip_data in manifest["selected_clips"]:
                 # Create a simplified VideoClip object from manifest data
                 video_metadata = clip_data["video_metadata"]
-                
+
                 # Create clip object with manifest data
                 clip = VideoClip(
                     file_path=clip_data["video_path"],
@@ -870,9 +736,9 @@ class SurfingDataLoader:
                     format=manifest["selection_metadata"]["video_format"],
                     zoom_level=clip_data["zoom_level"],
                     base_clip_id=clip_data["base_clip_id"],
-                    annotations=[]  # Annotations handled in maneuver objects
+                    annotations=[],  # Annotations handled in maneuver objects
                 )
-                
+
                 # Create maneuver objects from manifest data
                 for maneuver_data in clip_data["maneuvers"]:
                     maneuver = Maneuver(
@@ -884,13 +750,15 @@ class SurfingDataLoader:
                         end_time=maneuver_data["end_time"],
                         start_frame=maneuver_data["start_frame"],
                         end_frame=maneuver_data["end_frame"],
-                        annotation_data=maneuver_data["annotation_data"]
+                        annotation_data=maneuver_data["annotation_data"],
                     )
                     maneuvers.append(maneuver)
-            
-            logger.info(f"✅ Loaded {len(maneuvers)} maneuvers from {len(manifest['selected_clips'])} clips")
+
+            logger.info(
+                f"✅ Loaded {len(maneuvers)} maneuvers from {len(manifest['selected_clips'])} clips"
+            )
             return maneuvers
-            
+
         except Exception as e:
             logger.error(f"Failed to load maneuvers from manifest {manifest_path}: {e}")
             raise
@@ -965,7 +833,13 @@ class SurfingDataLoader:
 
 
 def main():
-    """Example usage of the data loader."""
+    """Example usage of the data loader with centralized data selection."""
+    print("⚠️  NOTE: This is a legacy example. Use DataSelectionManager for production.")
+    print(
+        "    The DataSelectionManager provides centralized, deterministic data selection."
+    )
+    print("    See utils/data_selection_manager.py for the recommended approach.")
+
     # Example configuration
     config = {
         "data_source": {
@@ -973,6 +847,7 @@ def main():
             "video_clips": {
                 "h264_path": "03_CLIPPED/h264",
                 "ffv1_path": "03_CLIPPED/ffv1",
+                "input_format": "h264",
             },
             "annotations": {
                 "labels_path": "04_ANNOTATED/surf-manoeuvre-labels",
@@ -1004,23 +879,27 @@ def main():
     loader.load_annotations()
     clips = loader.discover_video_clips("h264")
 
-    # Create data splits
-    splits = loader.create_data_splits()
+    print(f"\nDiscovered {len(clips)} clips with annotations")
 
-    # Print statistics
-    print("Data Split Statistics:")
-    print(json.dumps(splits.get_split_stats(), indent=2))
+    # Show zoom distribution
+    from collections import Counter
 
-    # Get evaluation subset
-    test_clips = loader.get_evaluation_subset(
-        split="test", max_clips=10, cameras=["SONY_300"]
-    )
+    zoom_dist = Counter(clip.zoom_level for clip in clips)
+    print(f"Zoom distribution: {dict(zoom_dist)}")
 
-    print(f"\nSelected {len(test_clips)} clips for evaluation")
-    for clip in test_clips[:3]:
-        print(
-            f"  {clip.video_id}: {clip.duration:.1f}s, {len(clip.annotations)} annotations"
-        )
+    # Show camera distribution
+    camera_dist = Counter(clip.camera for clip in clips)
+    print(f"Camera distribution: {dict(camera_dist)}")
+
+    # Example of loading from a manifest (if one exists)
+    manifest_example = "./data_selections/example_selection.json"
+    if Path(manifest_example).exists():
+        print(f"\nLoading maneuvers from manifest: {manifest_example}")
+        maneuvers = loader.load_maneuvers_from_manifest(manifest_example)
+        print(f"Loaded {len(maneuvers)} maneuvers from manifest")
+    else:
+        print(f"\nNo manifest found at {manifest_example}")
+        print("Use DataSelectionManager to generate selection manifests.")
 
 
 if __name__ == "__main__":

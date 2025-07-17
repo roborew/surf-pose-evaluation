@@ -4,6 +4,9 @@ Test script for zoom-aware data loading functionality.
 
 This script demonstrates how the framework handles zoom variations to prevent
 data leakage while maintaining balanced distribution across zoom levels.
+
+NOTE: This test uses some internal methods for validation purposes.
+Production code should use DataSelectionManager for centralized data selection.
 """
 
 import sys
@@ -19,13 +22,14 @@ from data_handling.data_loader import SurfingDataLoader
 def test_zoom_aware_loading():
     """Test the zoom-aware data loading functionality."""
 
-    # Configuration for testing
+    # Configuration for testing (updated structure)
     config = {
-        "dataset": {
+        "data_source": {
             "base_data_path": "./data/SD_02_SURF_FOOTAGE_PREPT",
             "video_clips": {
                 "h264_path": "03_CLIPPED/h264",
                 "ffv1_path": "03_CLIPPED/ffv1",
+                "input_format": "h264",
             },
             "annotations": {
                 "labels_path": "04_ANNOTATED/surf-manoeuvre-labels",
@@ -47,17 +51,20 @@ def test_zoom_aware_loading():
                     },
                 },
             },
+            "camera_selection": {"enabled_cameras": ["SONY_300", "SONY_70"]},
         }
     }
 
     print("🔍 Testing Zoom-Aware Data Loading")
     print("=" * 50)
+    print("⚠️  NOTE: This test uses internal methods for validation.")
+    print("   Production code should use DataSelectionManager instead.")
 
     # Initialize data loader
     loader = SurfingDataLoader(config)
 
     # Load annotations
-    print("📋 Loading annotations...")
+    print("\n📋 Loading annotations...")
     annotations = loader.load_annotations()
     print(f"   Found annotations for {len(annotations)} video files")
 
@@ -97,8 +104,9 @@ def test_zoom_aware_loading():
     else:
         print("   ❌ FAIL: Potential data leakage detected!")
 
-    # Create data splits
+    # Create data splits (for testing purposes only)
     print(f"\n🔄 Creating train/val/test splits...")
+    loader.all_clips = clips  # Set clips for split creation
     splits = loader.create_data_splits()
 
     # Analyze splits
@@ -113,7 +121,11 @@ def test_zoom_aware_loading():
         print(f"     Maneuvers: {split_stats['total_maneuvers']}")
         print(f"     Zoom distribution:")
         for zoom, count in split_stats["zoom_distribution"].items():
-            pct = (count / split_stats["num_clips"]) * 100
+            pct = (
+                (count / split_stats["num_clips"]) * 100
+                if split_stats["num_clips"] > 0
+                else 0
+            )
             print(f"       {zoom:>7}: {count:>2} ({pct:>4.1f}%)")
 
     # Check for cross-split leakage
@@ -148,16 +160,11 @@ def test_zoom_aware_loading():
         print(f"      Maneuvers: {len(clip.annotations)}")
 
     print(f"\n🎉 Zoom-aware data loading test completed!")
-
-    return loader, clips, splits
+    print("\n💡 For production use:")
+    print("   • Use DataSelectionManager for centralized data selection")
+    print("   • Generate selection manifests for reproducible experiments")
+    print("   • Load data from manifests using load_maneuvers_from_manifest()")
 
 
 if __name__ == "__main__":
-    try:
-        loader, clips, splits = test_zoom_aware_loading()
-        print(f"\n✅ All tests completed successfully!")
-    except Exception as e:
-        print(f"\n❌ Test failed with error: {e}")
-        import traceback
-
-        traceback.print_exc()
+    test_zoom_aware_loading()
