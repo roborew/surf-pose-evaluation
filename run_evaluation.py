@@ -12,7 +12,7 @@ import json
 import yaml
 from pathlib import Path
 import time
-from typing import Dict
+from typing import Dict, List
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent))
