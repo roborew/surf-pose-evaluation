@@ -526,13 +526,11 @@ class PoseEvaluator:
     def _create_sample_visualizations_from_manifest(
         self, model, model_name: str, visualization_manifest_path: str
     ):
-        """Create sample visualization videos using pre-selected maneuvers from manifest"""
+        """Create sample visualization videos using prediction files from manifest"""
         from utils.pose_video_visualizer import PoseVideoVisualizer
         from utils.data_selection_manager import DataSelectionManager
 
-        logging.info(
-            f"Creating visualizations for {model_name} from manifest selection"
-        )
+        logging.info(f"Creating visualizations for {model_name} from prediction files")
 
         # Load visualization manifest
         try:
@@ -564,146 +562,55 @@ class PoseEvaluator:
 
         for maneuver_data in selected_maneuvers:
             try:
-                # Create maneuver object from manifest data
-                source_clip = maneuver_data["source_clip"]
-
-                # Create a minimal VideoClip object
-                from data_handling.data_loader import VideoClip, Maneuver
-
-                clip = VideoClip(
-                    file_path=source_clip["video_path"],
-                    video_id=source_clip["clip_id"],
-                    camera=source_clip["clip_id"].split("_")[0]
-                    + "_"
-                    + source_clip["clip_id"].split("_")[1],
-                    session="_".join(source_clip["clip_id"].split("_")[2:4]),
-                    duration=source_clip["video_metadata"]["duration"],
-                    fps=source_clip["video_metadata"]["fps"],
-                    width=source_clip["video_metadata"]["width"],
-                    height=source_clip["video_metadata"]["height"],
-                    format=viz_manifest["selection_metadata"].get(
-                        "video_format", "h264"
-                    ),
-                    zoom_level=source_clip["clip_id"].split("_")[-1],
-                    base_clip_id="_".join(source_clip["clip_id"].split("_")[4:-1]),
-                    annotations=[],
-                )
-
-                # Create maneuver object
-                maneuver = Maneuver(
-                    clip=clip,
-                    maneuver_id=maneuver_data["maneuver_id"],
-                    maneuver_type=maneuver_data["maneuver_type"],
-                    execution_score=maneuver_data["execution_score"],
-                    start_time=maneuver_data["start_time"],
-                    end_time=maneuver_data["end_time"],
-                    start_frame=maneuver_data["start_frame"],
-                    end_frame=maneuver_data["end_frame"],
-                    annotation_data=maneuver_data["annotation_data"],
-                )
-
-                # Generate pose predictions for this maneuver
-                pose_results = self._generate_pose_predictions(model, maneuver)
-
-                if not pose_results:
+                # Find prediction file for this maneuver
+                if not self.prediction_handler:
                     logging.warning(
-                        f"No pose prediction data for maneuver {maneuver.maneuver_id}, skipping visualization"
+                        "No prediction handler available, skipping visualization"
                     )
                     continue
 
-                # Create output filename based on maneuver details
-                video_stem = Path(maneuver.file_path).stem
-                maneuver_type_clean = maneuver.maneuver_type.replace("-", "_").replace(
-                    " ", "_"
+                # Create prediction file path based on maneuver data
+                maneuver_type = maneuver_data["maneuver_type"]
+                execution_score = maneuver_data["execution_score"]
+                video_path = maneuver_data["source_clip"]["video_path"]
+
+                prediction_file_path = (
+                    self.prediction_handler.get_prediction_file_path_with_details(
+                        model_name=model_name,
+                        maneuver_type=maneuver_type,
+                        execution_score=execution_score,
+                        video_path=video_path,
+                    )
                 )
+
+                if not Path(prediction_file_path).exists():
+                    logging.warning(
+                        f"Prediction file not found for maneuver {maneuver_data['maneuver_id']}: {prediction_file_path}"
+                    )
+                    continue
+
+                # Create output filename based on prediction file
+                prediction_filename = Path(prediction_file_path).stem
                 output_filename = (
-                    f"{model_name}_{video_stem}_{maneuver_type_clean}_visualization.mp4"
+                    f"{model_name}_{prediction_filename}_visualization.mp4"
                 )
                 output_path = viz_dir / output_filename
 
-                # Create visualization video
-                success = visualizer.create_pose_visualization_video(
-                    video_path=maneuver.file_path,
-                    pose_results=pose_results,
+                # Create visualization from prediction file
+                success = visualizer.create_visualization_from_prediction_file(
+                    prediction_file_path=prediction_file_path,
                     output_path=str(output_path),
-                    model_name=model_name,
-                    maneuver_start_frame=maneuver.start_frame,
-                    maneuver_end_frame=maneuver.end_frame,
                 )
 
                 if success:
                     created_count += 1
-
-                    # Calculate detection stats for this video
-                    frames_with_detections = sum(
-                        1 for result in pose_results if result.get("num_persons", 0) > 0
-                    )
-                    detection_rate = (
-                        frames_with_detections / len(pose_results) * 100
-                        if pose_results
-                        else 0
-                    )
-
-                    logging.info(
-                        f"Created visualization {created_count}: {output_filename} "
-                        f"({detection_rate:.1f}% detection rate, {maneuver.maneuver_type})"
-                    )
+                    logging.info(f"  ✓ Created: {output_filename}")
                 else:
-                    logging.warning(
-                        f"Failed to create visualization for {maneuver.maneuver_id}"
-                    )
+                    logging.warning(f"  ✗ Failed: {output_filename}")
 
             except Exception as e:
-                logging.error(f"Error creating visualization for maneuver: {e}")
+                logging.error(
+                    f"Failed to create visualization for maneuver {maneuver_data.get('maneuver_id', 'unknown')}: {e}"
+                )
 
-        logging.info(
-            f"Created {created_count} visualization videos for {model_name} from manifest selection"
-        )
-
-    def _generate_pose_predictions(self, model, maneuver) -> List[Dict]:
-        """Generate pose predictions for a maneuver for visualization"""
-        try:
-            # Load video frames using the data loader
-            frames = self.data_loader.load_video_frames(maneuver)
-
-            pose_results = []
-            frames_with_poses = 0
-
-            for i, frame in enumerate(frames):
-                # Get pose prediction for this frame
-                pose_result = model.predict(frame)
-
-                # Convert to format expected by visualizer
-                if pose_result:
-                    # Add frame index to the result
-                    if isinstance(pose_result, dict):
-                        pose_result["frame_id"] = i
-                    pose_results.append(pose_result)
-
-                    # Count frames with actual detections
-                    if pose_result.get("num_persons", 0) > 0:
-                        frames_with_poses += 1
-                else:
-                    # Add empty result for missing predictions
-                    empty_result = {
-                        "frame_id": i,
-                        "num_persons": 0,
-                        "keypoints": [],
-                        "scores": [],
-                        "bbox": [],
-                    }
-                    pose_results.append(empty_result)
-
-            logging.info(
-                f"Generated {len(pose_results)} pose predictions for visualization "
-                f"({frames_with_poses} frames with detections, "
-                f"{frames_with_poses/len(pose_results)*100:.1f}% detection rate)"
-            )
-
-            # Always return results, even if no poses detected
-            # The visualizer can handle empty poses and will show the video without annotations
-            return pose_results
-
-        except Exception as e:
-            logging.error(f"Failed to generate pose predictions: {e}")
-            return []
+        logging.info(f"Created {created_count} visualization videos for {model_name}")

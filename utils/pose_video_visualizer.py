@@ -315,32 +315,72 @@ class PoseVideoVisualizer:
             return self.colors["face"]
         return self.colors["default"]
 
-    def create_pose_visualization_video(
+    def create_visualization_from_prediction_file(
+        self,
+        prediction_file_path: str,
+        output_path: str,
+        kpt_thr: float = 0.3,
+        bbox_thr: float = 0.3,
+        max_persons: int = 3,
+    ) -> bool:
+        """Create visualization video from standardized prediction file
+
+        Args:
+            prediction_file_path: Path to prediction JSON file
+            output_path: Path for output video
+            kpt_thr: Keypoint confidence threshold
+            bbox_thr: Bounding box confidence threshold
+            max_persons: Maximum number of persons to visualize
+
+        Returns:
+            Success status
+        """
+        try:
+            from utils.prediction_file_format import PredictionFileHandler
+
+            # Load prediction file
+            handler = PredictionFileHandler(Path(prediction_file_path).parent)
+            prediction = handler.load_prediction_file(prediction_file_path)
+
+            # Create visualization using standardized format
+            return self.create_visualization_from_frame_predictions(
+                video_path=prediction.video_path,
+                frame_predictions=prediction.frames,
+                output_path=output_path,
+                model_name=prediction.model_name,
+                kpt_thr=kpt_thr,
+                bbox_thr=bbox_thr,
+                max_persons=max_persons,
+                maneuver_start_frame=prediction.start_frame,
+                maneuver_end_frame=prediction.end_frame,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to create visualization from prediction file: {e}")
+            return False
+
+    def create_visualization_from_frame_predictions(
         self,
         video_path: str,
-        pose_results: List[Dict[str, Any]],
+        frame_predictions: List,  # List[FramePrediction]
         output_path: str,
         model_name: str,
         kpt_thr: float = 0.3,
         bbox_thr: float = 0.3,
         max_persons: int = 3,
-        start_frame: int = 0,
-        end_frame: Optional[int] = None,
         maneuver_start_frame: Optional[int] = None,
         maneuver_end_frame: Optional[int] = None,
     ) -> bool:
-        """Create high-quality pose visualization video
+        """Create high-quality pose visualization video from standardized frame predictions
 
         Args:
             video_path: Path to input video
-            pose_results: List of pose results per frame
+            frame_predictions: List of FramePrediction objects
             output_path: Path for output video
             model_name: Name of the pose model
             kpt_thr: Keypoint confidence threshold
-            bbox_thr: Bounding box confidence threshold
+            bbox_thr: Bounding box confidence threshold (unused for detection_confidence)
             max_persons: Maximum number of persons to visualize
-            start_frame: Starting frame index (relative to video)
-            end_frame: Ending frame index (relative to video)
             maneuver_start_frame: Starting frame of maneuver (absolute frame index)
             maneuver_end_frame: Ending frame of maneuver (absolute frame index)
 
@@ -371,13 +411,13 @@ class PoseVideoVisualizer:
                     f"frames {actual_start_frame}-{actual_end_frame} ({frames_to_process} frames)"
                 )
             else:
-                # Use provided range or full video
-                actual_start_frame = start_frame
-                actual_end_frame = end_frame if end_frame is not None else total_frames
-                frames_to_process = actual_end_frame - actual_start_frame
+                # Use full frame prediction range
+                actual_start_frame = 0
+                actual_end_frame = len(frame_predictions)
+                frames_to_process = len(frame_predictions)
                 logger.info(
                     f"Creating visualization: {width}x{height} @ {fps:.2f} FPS, "
-                    f"frames {actual_start_frame}-{actual_end_frame} ({frames_to_process} frames)"
+                    f"{frames_to_process} frames from predictions"
                 )
 
             # Create temp directory for frames
@@ -390,21 +430,23 @@ class PoseVideoVisualizer:
 
             # Process frames
             frame_idx = actual_start_frame
-            pose_result_idx = 0  # Index into pose_results array
+            prediction_idx = 0
             annotated_frames = 0
             output_frame_idx = 0  # Index for output frame naming
 
-            while frame_idx < actual_end_frame:
+            while (
+                prediction_idx < len(frame_predictions) and frame_idx < actual_end_frame
+            ):
                 ret, frame = cap.read()
                 if not ret:
                     break
 
-                # Get pose results for this frame
+                # Get frame prediction for this frame
                 frame_annotated = False
-                if pose_result_idx < len(pose_results):
-                    pose_result = pose_results[pose_result_idx]
-                    frame_annotated = self._draw_poses_on_frame(
-                        frame, pose_result, kpt_thr, bbox_thr, max_persons
+                if prediction_idx < len(frame_predictions):
+                    frame_prediction = frame_predictions[prediction_idx]
+                    frame_annotated = self._draw_poses_on_frame_standardized(
+                        frame, frame_prediction, kpt_thr, bbox_thr, max_persons
                     )
 
                 # Add model name and frame info
@@ -420,7 +462,7 @@ class PoseVideoVisualizer:
                     annotated_frames += 1
 
                 frame_idx += 1
-                pose_result_idx += 1
+                prediction_idx += 1
                 output_frame_idx += 1
 
                 # Progress update
@@ -455,41 +497,30 @@ class PoseVideoVisualizer:
             logger.error(f"Failed to create pose visualization: {e}")
             return False
 
-    def _draw_poses_on_frame(
+    def _draw_poses_on_frame_standardized(
         self,
         frame: np.ndarray,
-        pose_result: Dict[str, Any],
+        frame_prediction,  # FramePrediction
         kpt_thr: float,
         bbox_thr: float,
         max_persons: int,
     ) -> bool:
-        """Draw pose annotations on a single frame"""
-        if pose_result.get("num_persons", 0) == 0:
-            return False
-
-        keypoints = pose_result.get("keypoints", [])
-        scores = pose_result.get("scores", [])
-        bboxes = pose_result.get("bbox", [])
-
-        if len(keypoints) == 0:
+        """Draw pose annotations on a single frame using standardized format"""
+        if not frame_prediction.persons:
             return False
 
         frame_annotated = False
-        num_persons = min(len(keypoints), max_persons)
+        num_persons = min(len(frame_prediction.persons), max_persons)
 
         for person_idx in range(num_persons):
-            person_kpts = keypoints[person_idx] if person_idx < len(keypoints) else None
-            person_scores = scores[person_idx] if person_idx < len(scores) else None
-            person_bbox = bboxes[person_idx] if person_idx < len(bboxes) else None
-
-            if person_kpts is None:
-                continue
+            person = frame_prediction.persons[person_idx]
 
             # Draw bounding box
-            if person_bbox is not None and len(person_bbox) >= 4:
-                bbox_score = person_bbox[4] if len(person_bbox) > 4 else 1.0
+            if len(person.bbox) >= 4:
+                # Use detection_confidence instead of bbox confidence
+                bbox_score = person.detection_confidence
                 if bbox_score >= bbox_thr:
-                    x1, y1, x2, y2 = [int(coord) for coord in person_bbox[:4]]
+                    x1, y1, x2, y2 = [int(coord) for coord in person.bbox[:4]]
                     cv2.rectangle(
                         frame,
                         (x1, y1),
@@ -497,8 +528,8 @@ class PoseVideoVisualizer:
                         self.colors["bbox"],
                         self.bbox_thickness,
                     )
-                    # Add person confidence score
-                    score_text = f"P{person_idx+1}: {bbox_score:.2f}"
+                    # Add person confidence score with proper person ID
+                    score_text = f"ID{person.person_id}: {bbox_score:.2f}"
                     cv2.putText(
                         frame,
                         score_text,
@@ -511,29 +542,20 @@ class PoseVideoVisualizer:
                     frame_annotated = True
 
             # Draw keypoints and skeleton
-            if len(person_kpts) >= 17:  # COCO format
+            if len(person.keypoints) >= 17:  # COCO format
                 confident_pts = {}
 
                 # Draw keypoints
-                for kpt_idx in range(min(17, len(person_kpts))):
-                    if len(person_kpts[kpt_idx]) >= 2:
-                        x, y = person_kpts[kpt_idx][:2]
-                        kpt_score = (
-                            person_scores[kpt_idx]
-                            if (
-                                person_scores is not None
-                                and kpt_idx < len(person_scores)
-                            )
-                            else 1.0
-                        )
+                for kpt_idx in range(min(17, len(person.keypoints))):
+                    kp = person.keypoints[kpt_idx]
 
-                        if kpt_score >= kpt_thr:
-                            color = self.get_keypoint_color(kpt_idx)
-                            cv2.circle(
-                                frame, (int(x), int(y)), self.kpt_radius, color, -1
-                            )
-                            confident_pts[kpt_idx] = (int(x), int(y))
-                            frame_annotated = True
+                    if kp.confidence >= kpt_thr:
+                        color = self.get_keypoint_color(kpt_idx)
+                        cv2.circle(
+                            frame, (int(kp.x), int(kp.y)), self.kpt_radius, color, -1
+                        )
+                        confident_pts[kpt_idx] = (int(kp.x), int(kp.y))
+                        frame_annotated = True
 
                 # Draw skeleton
                 for idx1, idx2, color_key in self.skeleton_definitions:
@@ -703,132 +725,4 @@ class PoseVideoVisualizer:
             return False
         except Exception as e:
             logger.error(f"Error creating video: {e}")
-            return False
-
-    def create_model_comparison_video(
-        self,
-        video_path: str,
-        model_results: Dict[str, List[Dict[str, Any]]],
-        output_path: str,
-        kpt_thr: float = 0.3,
-        bbox_thr: float = 0.3,
-    ) -> bool:
-        """Create side-by-side comparison video of multiple models
-
-        Args:
-            video_path: Path to input video
-            model_results: Dict of model_name -> pose_results_per_frame
-            output_path: Path for output comparison video
-            kpt_thr: Keypoint confidence threshold
-            bbox_thr: Bounding box confidence threshold
-
-        Returns:
-            Success status
-        """
-        try:
-            if not model_results:
-                logger.error("No model results provided for comparison")
-                return False
-
-            # Open input video
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                logger.error(f"Could not open video: {video_path}")
-                return False
-
-            # Get video properties
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-            # Calculate grid layout
-            num_models = len(model_results)
-            cols = min(2, num_models)
-            rows = (num_models + cols - 1) // cols
-
-            # Create comparison grid
-            grid_width = width * cols
-            grid_height = height * rows
-
-            logger.info(
-                f"Creating {num_models}-model comparison: {grid_width}x{grid_height}"
-            )
-
-            # Create temp directory
-            temp_dir = Path(output_path).parent / "temp_comparison_frames"
-            temp_dir.mkdir(exist_ok=True)
-
-            frame_idx = 0
-            model_names = list(model_results.keys())
-
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                # Create comparison grid
-                grid_frame = np.zeros((grid_height, grid_width, 3), dtype=np.uint8)
-
-                for model_idx, model_name in enumerate(model_names):
-                    # Calculate position in grid
-                    row = model_idx // cols
-                    col = model_idx % cols
-
-                    # Get model results for this frame
-                    model_pose_results = model_results[model_name]
-                    pose_result = (
-                        model_pose_results[frame_idx]
-                        if frame_idx < len(model_pose_results)
-                        else {}
-                    )
-
-                    # Create annotated frame
-                    model_frame = frame.copy()
-                    self._draw_poses_on_frame(
-                        model_frame, pose_result, kpt_thr, bbox_thr, 2
-                    )
-                    self._add_frame_info(
-                        model_frame, model_name, frame_idx, total_frames
-                    )
-
-                    # Place in grid
-                    y_start = row * height
-                    y_end = (row + 1) * height
-                    x_start = col * width
-                    x_end = (col + 1) * width
-
-                    grid_frame[y_start:y_end, x_start:x_end] = model_frame
-
-                # Save grid frame
-                frame_path = temp_dir / f"frame_{frame_idx:06d}.png"
-                cv2.imwrite(str(frame_path), grid_frame)
-
-                frame_idx += 1
-
-                if frame_idx % 50 == 0:
-                    logger.info(
-                        f"  Processed {frame_idx}/{total_frames} comparison frames"
-                    )
-
-            cap.release()
-
-            # Create comparison video
-            success = self._create_video_from_frames(
-                temp_dir, output_path, fps, video_path
-            )
-
-            # Cleanup
-            shutil.rmtree(temp_dir)
-
-            if success:
-                file_size = os.path.getsize(output_path) / (1024 * 1024)
-                logger.info(
-                    f"Created comparison video: {output_path} ({file_size:.2f} MB)"
-                )
-
-            return success
-
-        except Exception as e:
-            logger.error(f"Failed to create comparison video: {e}")
             return False
