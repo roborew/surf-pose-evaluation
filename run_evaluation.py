@@ -12,7 +12,7 @@ import json
 import yaml
 from pathlib import Path
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent))
@@ -126,11 +126,88 @@ def run_optuna_phase(run_manager: RunManager, args, optuna_maneuvers: List) -> D
 # The extract_best_parameters function has been moved to OptunaPoseOptimizer class
 
 
+def run_coco_validation_phase(
+    run_manager: RunManager, args, coco_annotations_path: str
+) -> Dict:
+    """Run COCO validation phase for ground truth PCK scores using optimized parameters"""
+    logger = logging.getLogger(__name__)
+
+    logger.info("🧪 Starting COCO validation phase with optimized parameters...")
+
+    # Create COCO-specific config (use comparison config as base)
+    coco_config_path = run_manager.create_config_for_phase(
+        "coco_validation",
+        args.comparison_config,
+        None,  # No clip limit for COCO
+    )
+
+    # Load config
+    with open(coco_config_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    # Configure best parameters loading for COCO validation (if available)
+    if "models" not in config:
+        config["models"] = {}
+
+    # Check if best parameters exist
+    best_params_file = run_manager.best_params_dir / "best_parameters.yaml"
+    if best_params_file.exists():
+        config["models"]["load_best_params"] = {
+            "enabled": True,
+            "source_path": str(run_manager.best_params_dir),
+            "fallback_to_defaults": True,
+        }
+        logger.info(
+            f"✅ Configured COCO validation to use optimized parameters from {run_manager.best_params_dir}"
+        )
+    else:
+        config["models"]["load_best_params"] = {
+            "enabled": False,
+            "fallback_to_defaults": True,
+        }
+        logger.info(
+            "⚠️ No optimized parameters found, COCO validation will use default parameters"
+        )
+
+    # Save updated config
+    with open(coco_config_path, "w") as f:
+        yaml.safe_dump(config, f)
+
+    # Set MLflow experiment name for COCO validation
+    import mlflow
+
+    experiment_name = (
+        config.get("mlflow", {})
+        .get("experiment_name", "surf_pose_coco_validation")
+        .replace("comparison", "coco_validation")
+    )
+    mlflow.set_experiment(experiment_name)
+    logger.info(f"MLflow experiment set to: {experiment_name}")
+
+    # Initialize evaluator
+    evaluator = PoseEvaluator(config)
+    evaluator.run_manager = run_manager
+
+    logger.info("Running COCO validation for ground truth PCK scores")
+
+    # Run COCO validation
+    coco_results = evaluator.run_coco_validation_phase(
+        models=args.models,
+        coco_annotations_path=coco_annotations_path,
+        coco_images_path=None,  # Will download images as needed
+        max_images=50,  # Reasonable subset for validation
+    )
+
+    logger.info("✅ COCO validation phase completed successfully")
+    return {"config_path": coco_config_path, "results": coco_results}
+
+
 def run_comparison_phase(
     run_manager: RunManager,
     args,
     comparison_maneuvers: List,
     visualization_manifest_path: str,
+    coco_results: Optional[Dict] = None,
 ) -> Dict:
     """Run comprehensive comparison phase with pre-selected data"""
     logger = logging.getLogger(__name__)
@@ -194,6 +271,13 @@ def run_comparison_phase(
             model_result = evaluator.evaluate_single_model_with_data(
                 model_name, comparison_maneuvers, visualization_manifest_path
             )
+
+            # Merge COCO validation results if available
+            if coco_results and model_name in coco_results:
+                coco_metrics = coco_results[model_name]
+                if isinstance(model_result, dict) and isinstance(coco_metrics, dict):
+                    model_result.update(coco_metrics)
+                    logger.info(f"Merged COCO validation results for {model_name}")
 
             # Log metrics to MLflow - Fix: Access metrics correctly
             if isinstance(model_result, dict) and "error" not in model_result:
@@ -283,8 +367,16 @@ def generate_summary_report(
                 "model": run.get("params.model_name", "unknown"),
                 "run_name": run.get("tags.mlflow.runName", "unknown"),
                 "accuracy": {
+                    # Legacy PCK (usually null without ground truth)
                     "pck_error_mean": run.get("metrics.pose_pck_error_mean", None),
                     "detection_f1": run.get("metrics.pose_detection_f1_mean", None),
+                    # COCO Ground Truth Validation
+                    "coco_pck_0.1": run.get("metrics.coco_pck_0.1", None),
+                    "coco_pck_0.2": run.get("metrics.coco_pck_0.2", None),
+                    "coco_pck_0.3": run.get("metrics.coco_pck_0.3", None),
+                    "coco_pck_0.5": run.get("metrics.coco_pck_0.5", None),
+                    "coco_pck_error_mean": run.get("metrics.coco_pck_error_mean", None),
+                    "coco_detection_f1": run.get("metrics.coco_detection_f1", None),
                     # Enhanced detection metrics
                     "pose_stability_mean": run.get(
                         "metrics.pose_pose_stability_mean_mean", None
@@ -301,7 +393,7 @@ def generate_summary_report(
                     "detection_consistency": run.get(
                         "metrics.pose_detection_consistency_mean", None
                     ),
-                    # Consensus-based metrics
+                    # Consensus-based metrics (pseudo ground truth)
                     "relative_pck_error": run.get(
                         "metrics.pose_relative_pck_error_mean", None
                     ),
@@ -316,6 +408,7 @@ def generate_summary_report(
                     ),
                 },
                 "performance": {
+                    # Production dataset performance
                     "fps_mean": run.get("metrics.perf_fps_mean", None),
                     "inference_time_ms": run.get(
                         "metrics.perf_avg_inference_time_mean", None
@@ -323,7 +416,15 @@ def generate_summary_report(
                     "memory_usage_mb": run.get(
                         "metrics.perf_max_memory_usage_mean", None
                     ),  # Already in MB from the evaluator
-                    # Add new model characteristics
+                    # COCO validation performance
+                    "coco_fps_mean": run.get("metrics.coco_fps_mean", None),
+                    "coco_inference_time_ms": run.get(
+                        "metrics.coco_inference_time_ms", None
+                    ),
+                    "coco_images_processed": run.get(
+                        "metrics.coco_total_images_processed", None
+                    ),
+                    # Model characteristics
                     "model_size_mb": run.get("metrics.perf_model_size_mb_mean", None),
                     "memory_efficiency": run.get(
                         "metrics.perf_memory_efficiency_mean", None
@@ -413,6 +514,12 @@ def generate_summary_report(
             # Handle None values safely
             pck_error = result["accuracy"]["pck_error_mean"]
             detection_f1 = result["accuracy"]["detection_f1"]
+
+            # COCO ground truth metrics
+            coco_pck_02 = result["accuracy"]["coco_pck_0.2"]
+            coco_pck_05 = result["accuracy"]["coco_pck_0.5"]
+            coco_pck_error = result["accuracy"]["coco_pck_error_mean"]
+
             fps = result["performance"]["fps_mean"]
             inference_time = result["performance"]["inference_time_ms"]
             model_size = result["performance"]["model_size_mb"]
@@ -420,10 +527,44 @@ def generate_summary_report(
             avg_memory = result["performance"]["avg_memory_usage"]
             memory_peak_ratio = result["performance"]["memory_peak_to_avg_ratio"]
 
+            # COCO performance
+            coco_fps = result["performance"]["coco_fps_mean"]
+            coco_images = result["performance"]["coco_images_processed"]
+
+            # Display COCO ground truth accuracy
+            print("   🏆 COCO Ground Truth Validation:")
             print(
-                f"   • Accuracy (PCK Error): {pck_error:.4f}"
+                f"     • PCK@0.2: {coco_pck_02:.3f}"
+                if coco_pck_02 is not None
+                else "     • PCK@0.2: N/A"
+            )
+            print(
+                f"     • PCK@0.5: {coco_pck_05:.3f}"
+                if coco_pck_05 is not None
+                else "     • PCK@0.5: N/A"
+            )
+            print(
+                f"     • PCK Error: {coco_pck_error:.4f}"
+                if coco_pck_error is not None
+                else "     • PCK Error: N/A"
+            )
+            print(
+                f"     • COCO FPS: {coco_fps:.1f}"
+                if coco_fps is not None
+                else "     • COCO FPS: N/A"
+            )
+            print(
+                f"     • Images Tested: {coco_images}"
+                if coco_images is not None
+                else "     • Images Tested: N/A"
+            )
+
+            # Display legacy metrics
+            print("   📊 Production Dataset:")
+            print(
+                f"   • Legacy PCK Error: {pck_error:.4f}"
                 if pck_error is not None
-                else "   • Accuracy (PCK Error): N/A"
+                else "   • Legacy PCK Error: N/A"
             )
             print(
                 f"   • Detection F1: {detection_f1:.4f}"
@@ -643,11 +784,45 @@ def main():
             logger.info("⏭️ Skipping Optuna optimization phase")
             results["optuna_phase"] = "skipped"
 
-        # Phase 2: Comprehensive Comparison
+        # Phase 2: COCO Ground Truth Validation (AFTER Optuna to use optimized parameters)
+        coco_results = None
+        if not args.skip_comparison and not args.optuna_only:
+            # Run COCO validation for ground truth PCK scores using optimized parameters (if available)
+            coco_annotations_path = "data/SD_01_SURF_FOOTAGE_SOURCE/03_THIRD_PARTY_DATA_SETS/COCO_2017_annotations/person_keypoints_val2017.json"
+
+            if Path(coco_annotations_path).exists():
+                if results["optuna_phase"] == "completed":
+                    logger.info(
+                        "🧪 COCO annotations found, running ground truth validation with optimized parameters..."
+                    )
+                else:
+                    logger.info(
+                        "🧪 COCO annotations found, running ground truth validation with default parameters..."
+                    )
+
+                coco_validation_result = run_coco_validation_phase(
+                    run_manager, args, coco_annotations_path
+                )
+                results["coco_validation_phase"] = "completed"
+                results["configs_used"].append(coco_validation_result["config_path"])
+                results["coco_validation_results"] = coco_validation_result["results"]
+                coco_results = coco_validation_result["results"]
+            else:
+                logger.warning(
+                    f"⚠️ COCO annotations not found at {coco_annotations_path}"
+                )
+                logger.warning("⏭️ Skipping COCO validation phase")
+                results["coco_validation_phase"] = "skipped"
+
+        # Phase 3: Production Dataset Comparison
         if not args.skip_comparison and not args.optuna_only:
             if comparison_maneuvers:
                 comparison_result = run_comparison_phase(
-                    run_manager, args, comparison_maneuvers, visualization_manifest_path
+                    run_manager,
+                    args,
+                    comparison_maneuvers,
+                    visualization_manifest_path,
+                    coco_results,
                 )
                 results["comparison_phase"] = "completed"
                 results["configs_used"].append(comparison_result["config_path"])
@@ -696,8 +871,19 @@ def main():
             print(f"\n📊 Results Summary:")
             print(f"   Models: {', '.join(args.models)}")
             print(f"   Max clips: {args.max_clips or 'full dataset'}")
-            print(f"   Optuna Phase: {results['optuna_phase']}")
-            print(f"   Comparison Phase: {results['comparison_phase']}")
+            print(f"   Phase 1 - Optuna Optimization: {results['optuna_phase']}")
+
+            coco_phase_status = results.get("coco_validation_phase", "skipped")
+            if coco_phase_status == "completed":
+                if results["optuna_phase"] == "completed":
+                    coco_desc = f"{coco_phase_status} (with optimized params)"
+                else:
+                    coco_desc = f"{coco_phase_status} (with default params)"
+            else:
+                coco_desc = coco_phase_status
+            print(f"   Phase 2 - COCO Validation: {coco_desc}")
+
+            print(f"   Phase 3 - Production Comparison: {results['comparison_phase']}")
             print(f"   Configs Used: {len(results['configs_used'])}")
             print(
                 f"   ⏱️ Total Execution Time: {results['total_execution_time']['human_readable']}"

@@ -29,6 +29,7 @@ from utils.prediction_file_format import (
     get_keypoint_format_for_model,
     get_keypoint_names_for_model,
 )
+from utils.coco_evaluator import COCOPoseEvaluator
 
 # Import model wrappers when available
 try:
@@ -658,3 +659,135 @@ class PoseEvaluator:
                 )
 
         logging.info(f"Created {created_count} visualization videos for {model_name}")
+
+    def evaluate_model_on_coco(
+        self,
+        model_name: str,
+        coco_annotations_path: str,
+        coco_images_path: Optional[str] = None,
+        max_images: int = 50,
+    ) -> Dict[str, float]:
+        """Evaluate a pose model on COCO validation dataset
+
+        Args:
+            model_name: Name of the model to evaluate
+            coco_annotations_path: Path to COCO keypoint annotations
+            coco_images_path: Path to COCO images directory (optional)
+            max_images: Maximum number of images to evaluate
+
+        Returns:
+            Dictionary with COCO evaluation metrics
+        """
+        logger = logging.getLogger(__name__)
+
+        if model_name not in self.get_available_models():
+            logger.error(f"Model {model_name} not available")
+            return {}
+
+        # Initialize COCO evaluator
+        coco_evaluator = COCOPoseEvaluator(
+            coco_annotations_path=coco_annotations_path,
+            coco_images_path=coco_images_path,
+            max_images=max_images,
+            download_images=coco_images_path is None,  # Download if no local path
+        )
+
+        # Create model wrapper
+        model_wrapper = self._create_model_wrapper(model_name)
+        if not model_wrapper:
+            logger.error(f"Failed to create wrapper for {model_name}")
+            return {}
+
+        # Validate model compatibility
+        if not coco_evaluator.validate_model_compatibility(model_wrapper):
+            logger.error(f"Model {model_name} not compatible with COCO evaluation")
+            return {}
+
+        logger.info(f"Starting COCO evaluation for {model_name}")
+
+        try:
+            # Run COCO evaluation
+            coco_metrics = coco_evaluator.evaluate_model(
+                model_wrapper, model_name, subset_size=max_images
+            )
+
+            logger.info(f"COCO evaluation completed for {model_name}")
+
+            # Log key metrics
+            if coco_metrics:
+                logger.info(f"COCO Results for {model_name}:")
+                if "coco_pck_0.2" in coco_metrics:
+                    logger.info(f"  PCK@0.2: {coco_metrics['coco_pck_0.2']:.3f}")
+                if "coco_pck_0.5" in coco_metrics:
+                    logger.info(f"  PCK@0.5: {coco_metrics['coco_pck_0.5']:.3f}")
+                if "coco_fps_mean" in coco_metrics:
+                    logger.info(f"  FPS: {coco_metrics['coco_fps_mean']:.1f}")
+
+            return coco_metrics
+
+        except Exception as e:
+            logger.error(f"COCO evaluation failed for {model_name}: {e}")
+            return {}
+
+        finally:
+            # Clean up model
+            if hasattr(model_wrapper, "cleanup"):
+                model_wrapper.cleanup()
+
+    def run_coco_validation_phase(
+        self,
+        models: List[str],
+        coco_annotations_path: str,
+        coco_images_path: Optional[str] = None,
+        max_images: int = 50,
+    ) -> Dict[str, Dict[str, float]]:
+        """Run COCO validation phase for multiple models
+
+        Args:
+            models: List of model names to evaluate
+            coco_annotations_path: Path to COCO keypoint annotations
+            coco_images_path: Path to COCO images directory (optional)
+            max_images: Maximum number of images per model
+
+        Returns:
+            Dictionary mapping model names to their COCO metrics
+        """
+        logger = logging.getLogger(__name__)
+        logger.info(f"🏗️ Starting COCO validation phase for {len(models)} models")
+
+        results = {}
+
+        for model_name in models:
+            logger.info(f"📊 Evaluating {model_name} on COCO validation set...")
+
+            # Start MLflow run for COCO evaluation
+            run_name = f"{model_name}_coco_validation"
+            with mlflow.start_run(run_name=run_name):
+                # Log run parameters
+                mlflow.log_param("model_name", model_name)
+                mlflow.log_param("phase", "coco_validation")
+                mlflow.log_param("max_images", max_images)
+                mlflow.log_param("dataset", "COCO_2017_val")
+
+                # Run COCO evaluation
+                coco_metrics = self.evaluate_model_on_coco(
+                    model_name=model_name,
+                    coco_annotations_path=coco_annotations_path,
+                    coco_images_path=coco_images_path,
+                    max_images=max_images,
+                )
+
+                if coco_metrics:
+                    # Log metrics to MLflow
+                    for metric_name, value in coco_metrics.items():
+                        if isinstance(value, (int, float)) and not np.isnan(value):
+                            mlflow.log_metric(metric_name, value)
+
+                    results[model_name] = coco_metrics
+                    logger.info(f"✅ COCO validation completed for {model_name}")
+                else:
+                    logger.error(f"❌ COCO validation failed for {model_name}")
+                    results[model_name] = {}
+
+        logger.info(f"🎯 COCO validation phase completed for {len(results)} models")
+        return results
