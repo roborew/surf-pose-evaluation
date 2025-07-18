@@ -263,28 +263,295 @@ class COCOPoseEvaluator:
         Returns:
             Prediction in evaluation format
         """
+        # Add comprehensive diagnostics
+        model_name = prediction_result.get("metadata", {}).get("model", "unknown")
+        logger.info(f"🔍 Converting {model_name} prediction for COCO evaluation")
+
+        # Log the raw prediction structure
+        logger.info(f"📊 Raw prediction keys: {list(prediction_result.keys())}")
+        logger.info(
+            f"📊 Prediction types: {[(k, type(v)) for k, v in prediction_result.items()]}"
+        )
+
+        if "keypoints" in prediction_result:
+            kpts = prediction_result["keypoints"]
+            logger.info(f"📊 Keypoints type: {type(kpts)}")
+            logger.info(
+                f"📊 Keypoints shape: {kpts.shape if hasattr(kpts, 'shape') else 'No shape'}"
+            )
+            logger.info(
+                f"📊 Keypoints dtype: {kpts.dtype if hasattr(kpts, 'dtype') else 'No dtype'}"
+            )
+            logger.info(
+                f"📊 Keypoints sample (first few values): {kpts.flat[:10] if hasattr(kpts, 'flat') else 'Cannot access'}"
+            )
+
+        if "scores" in prediction_result:
+            scores = prediction_result["scores"]
+            logger.info(f"📊 Scores type: {type(scores)}")
+            logger.info(
+                f"📊 Scores shape: {scores.shape if hasattr(scores, 'shape') else len(scores)}"
+            )
+
+        # Try the conversion and catch specific errors
+        try:
+            converted_result = self._convert_prediction_with_robust_handling(
+                prediction_result, image_data, inference_time, model_name
+            )
+            logger.info(f"✅ Successfully converted {model_name} prediction")
+            return converted_result
+
+        except Exception as e:
+            logger.error(f"❌ Failed to convert {model_name} prediction: {e}")
+            logger.error(f"📊 Error type: {type(e).__name__}")
+            import traceback
+
+            logger.error(f"📊 Full traceback:\n{traceback.format_exc()}")
+
+            # Return empty result to continue evaluation
+            return {
+                "keypoints": np.array([]),
+                "scores": [],
+                "bbox": [],
+                "image_id": image_data["id"],
+                "inference_time": inference_time,
+                "num_persons": 0,
+                "conversion_error": str(e),
+                "model_name": model_name,
+            }
+
+    def _convert_prediction_with_robust_handling(
+        self,
+        prediction_result: Dict[str, Any],
+        image_data: Dict[str, Any],
+        inference_time: float,
+        model_name: str,
+    ) -> Dict[str, Any]:
+        """Robust prediction conversion with model-specific handling"""
+
+        # Model-specific conversion
+        if model_name == "mmpose":
+            return self._convert_mmpose_to_coco17(
+                prediction_result, image_data, inference_time
+            )
+        elif model_name == "yolov8_pose":
+            return self._convert_yolov8_to_coco17(
+                prediction_result, image_data, inference_time
+            )
+        else:
+            return self._convert_generic_to_coco17(
+                prediction_result, image_data, inference_time
+            )
+
+    def _convert_mmpose_to_coco17(
+        self,
+        prediction_result: Dict[str, Any],
+        image_data: Dict[str, Any],
+        inference_time: float,
+    ) -> Dict[str, Any]:
+        """Convert MMPose prediction to COCO-17 format"""
+        logger.info("🔧 Using MMPose-specific converter")
+
         keypoints = []
         scores = []
         bboxes = []
 
         if "keypoints" in prediction_result:
-            for person_kpts in prediction_result["keypoints"]:
-                # Convert to COCO format if needed
-                if len(person_kpts) >= 17:  # Ensure we have enough keypoints
-                    keypoints.append(person_kpts[:17])  # Take first 17 keypoints
+            raw_keypoints = prediction_result["keypoints"]
+            raw_scores = prediction_result.get("scores", [])
+            raw_bboxes = prediction_result.get("bbox", [])
 
-                    # Extract confidence scores if available
-                    if len(person_kpts[0]) >= 3:  # Has confidence
-                        person_scores = [
-                            kpt[2] if len(kpt) >= 3 else 0.5 for kpt in person_kpts[:17]
-                        ]
+            logger.info(f"📊 MMPose keypoints shape: {raw_keypoints.shape}")
+            logger.info(
+                f"📊 MMPose scores shape: {raw_scores.shape if hasattr(raw_scores, 'shape') else len(raw_scores)}"
+            )
+
+            # Handle different MMPose output formats
+            if len(raw_keypoints.shape) == 3:  # (N, 17, 2) or (N, 17, 3)
+                for person_idx in range(raw_keypoints.shape[0]):
+                    person_kpts = raw_keypoints[person_idx]
+
+                    # Ensure we have exactly 17 keypoints
+                    if person_kpts.shape[0] >= 17:
+                        # Take first 17 keypoints and only x,y coordinates
+                        person_kpts_17 = person_kpts[:17, :2]
+                        keypoints.append(person_kpts_17)
+
+                        # Handle scores
+                        if len(raw_scores) > person_idx and hasattr(
+                            raw_scores[person_idx], "__len__"
+                        ):
+                            person_scores = (
+                                raw_scores[person_idx][:17]
+                                if len(raw_scores[person_idx]) >= 17
+                                else [0.5] * 17
+                            )
+                        else:
+                            person_scores = [0.5] * 17
+                        scores.append(person_scores)
+
+                        # Handle bboxes
+                        if len(raw_bboxes) > person_idx:
+                            bbox = raw_bboxes[person_idx]
+                            if hasattr(bbox, "flatten"):
+                                bbox = bbox.flatten()
+                            bboxes.append(
+                                bbox[:4] if len(bbox) >= 4 else [0, 0, 100, 100]
+                            )
+                        else:
+                            bboxes.append([0, 0, 100, 100])
+
+        return {
+            "keypoints": np.array(keypoints) if keypoints else np.array([]),
+            "scores": scores,
+            "bbox": bboxes,
+            "image_id": image_data["id"],
+            "inference_time": inference_time,
+            "num_persons": len(keypoints),
+        }
+
+    def _convert_yolov8_to_coco17(
+        self,
+        prediction_result: Dict[str, Any],
+        image_data: Dict[str, Any],
+        inference_time: float,
+    ) -> Dict[str, Any]:
+        """Convert YOLOv8 prediction to COCO-17 format"""
+        logger.info("🔧 Using YOLOv8-specific converter")
+
+        keypoints = []
+        scores = []
+        bboxes = []
+
+        if "keypoints" in prediction_result:
+            raw_keypoints = prediction_result["keypoints"]
+            raw_scores = prediction_result.get("scores", [])
+            raw_bboxes = prediction_result.get("bbox", [])
+
+            logger.info(f"📊 YOLOv8 keypoints shape: {raw_keypoints.shape}")
+            logger.info(
+                f"📊 YOLOv8 scores shape: {raw_scores.shape if hasattr(raw_scores, 'shape') else len(raw_scores)}"
+            )
+
+            # Ensure numpy arrays (convert from tensors if needed)
+            if hasattr(raw_keypoints, "cpu"):
+                raw_keypoints = raw_keypoints.cpu().numpy()
+            if hasattr(raw_scores, "cpu"):
+                raw_scores = raw_scores.cpu().numpy()
+            if hasattr(raw_bboxes, "cpu"):
+                raw_bboxes = raw_bboxes.cpu().numpy()
+
+            # Handle YOLOv8 format: (N, 17, 2) keypoints, (N, 17) scores
+            if len(raw_keypoints.shape) == 3 and raw_keypoints.shape[1] == 17:
+                for person_idx in range(raw_keypoints.shape[0]):
+                    person_kpts = raw_keypoints[person_idx]  # (17, 2)
+                    keypoints.append(person_kpts)
+
+                    # Handle scores
+                    if len(raw_scores.shape) == 2 and raw_scores.shape[1] == 17:
+                        person_scores = raw_scores[person_idx]  # (17,)
                     else:
-                        person_scores = [0.5] * 17  # Default confidence
+                        person_scores = [0.5] * 17
                     scores.append(person_scores)
 
-        # Extract bounding boxes if available
-        if "bbox" in prediction_result:
-            bboxes = prediction_result["bbox"]
+                    # Handle bboxes
+                    if len(raw_bboxes) > person_idx:
+                        bbox = raw_bboxes[person_idx]
+                        bboxes.append(bbox[:4] if len(bbox) >= 4 else [0, 0, 100, 100])
+                    else:
+                        bboxes.append([0, 0, 100, 100])
+
+        return {
+            "keypoints": np.array(keypoints) if keypoints else np.array([]),
+            "scores": scores,
+            "bbox": bboxes,
+            "image_id": image_data["id"],
+            "inference_time": inference_time,
+            "num_persons": len(keypoints),
+        }
+
+    def _convert_generic_to_coco17(
+        self,
+        prediction_result: Dict[str, Any],
+        image_data: Dict[str, Any],
+        inference_time: float,
+    ) -> Dict[str, Any]:
+        """Generic conversion for other models (MediaPipe, BlazePose, PyTorch)"""
+        model_name = prediction_result.get("metadata", {}).get("model", "unknown")
+        logger.info(f"🔧 Using generic converter for {model_name}")
+
+        keypoints = []
+        scores = []
+        bboxes = []
+
+        if "keypoints" in prediction_result:
+            raw_keypoints = prediction_result["keypoints"]
+            raw_scores = prediction_result.get("scores", [])
+            raw_bboxes = prediction_result.get("bbox", [])
+
+            # Handle MediaPipe/BlazePose (33 keypoints) -> COCO-17 conversion
+            if raw_keypoints.shape[1] == 33:  # MediaPipe/BlazePose format
+                # Map 33 keypoints to 17 COCO keypoints
+                coco_indices = [
+                    0,
+                    2,
+                    5,
+                    7,
+                    8,
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16,
+                    23,
+                    24,
+                    25,
+                    26,
+                    27,
+                    28,
+                ]
+
+                for person_idx in range(raw_keypoints.shape[0]):
+                    person_kpts_33 = raw_keypoints[person_idx]  # (33, 2/3)
+                    person_kpts_17 = person_kpts_33[
+                        coco_indices, :2
+                    ]  # Take only x,y for COCO indices
+                    keypoints.append(person_kpts_17)
+
+                    # Map scores
+                    if len(raw_scores) > person_idx:
+                        person_scores_33 = raw_scores[person_idx]
+                        person_scores_17 = person_scores_33[coco_indices]
+                    else:
+                        person_scores_17 = [0.5] * 17
+                    scores.append(person_scores_17)
+
+                    # Handle bboxes
+                    if len(raw_bboxes) > person_idx:
+                        bbox = raw_bboxes[person_idx]
+                        bboxes.append(bbox[:4] if len(bbox) >= 4 else [0, 0, 100, 100])
+                    else:
+                        bboxes.append([0, 0, 100, 100])
+
+            elif raw_keypoints.shape[1] == 17:  # Already COCO-17 format (PyTorch)
+                for person_idx in range(raw_keypoints.shape[0]):
+                    person_kpts = raw_keypoints[person_idx, :, :2]  # Take only x,y
+                    keypoints.append(person_kpts)
+
+                    # Handle scores
+                    if len(raw_scores) > person_idx:
+                        person_scores = raw_scores[person_idx][:17]
+                    else:
+                        person_scores = [0.5] * 17
+                    scores.append(person_scores)
+
+                    # Handle bboxes
+                    if len(raw_bboxes) > person_idx:
+                        bbox = raw_bboxes[person_idx]
+                        bboxes.append(bbox[:4] if len(bbox) >= 4 else [0, 0, 100, 100])
+                    else:
+                        bboxes.append([0, 0, 100, 100])
 
         return {
             "keypoints": np.array(keypoints) if keypoints else np.array([]),
@@ -430,25 +697,79 @@ class COCOPoseEvaluator:
             # Create a dummy image
             dummy_image = np.zeros((480, 640, 3), dtype=np.uint8)
 
+            logger.info("🔍 Testing model compatibility with dummy image...")
+
             # Test prediction
             result = model_wrapper.predict(dummy_image)
 
+            # Log the result structure for diagnostics
+            model_name = result.get("metadata", {}).get("model", "unknown")
+            logger.info(f"📊 Compatibility test for {model_name}")
+            logger.info(f"📊 Result keys: {list(result.keys())}")
+            logger.info(f"📊 Result types: {[(k, type(v)) for k, v in result.items()]}")
+
             # Check if result has expected format
             if "keypoints" not in result:
-                logger.error("Model prediction missing 'keypoints' field")
+                logger.error(f"❌ {model_name} prediction missing 'keypoints' field")
                 return False
 
-            if len(result["keypoints"]) > 0:
-                person_kpts = result["keypoints"][0]
-                if len(person_kpts) < 17:
-                    logger.warning(
-                        f"Model produces {len(person_kpts)} keypoints, need at least 17 for COCO"
-                    )
-                    return False
+            keypoints = result["keypoints"]
+            logger.info(f"📊 Keypoints type: {type(keypoints)}")
+            logger.info(
+                f"📊 Keypoints shape: {keypoints.shape if hasattr(keypoints, 'shape') else 'No shape'}"
+            )
 
-            logger.info("Model is compatible with COCO evaluation")
+            # Check if we have any detections
+            if hasattr(keypoints, "shape"):
+                if len(keypoints.shape) == 0 or keypoints.shape[0] == 0:
+                    logger.info(
+                        f"ℹ️ {model_name} produced no detections on dummy image (this is normal)"
+                    )
+                    # No detections is OK for compatibility check
+                    logger.info(
+                        f"✅ {model_name} is compatible with COCO evaluation (format check passed)"
+                    )
+                    return True
+                else:
+                    # We have detections, check format
+                    logger.info(
+                        f"📊 {model_name} detected {keypoints.shape[0]} persons"
+                    )
+                    if len(keypoints.shape) >= 2:
+                        logger.info(f"📊 Keypoints per person: {keypoints.shape[1]}")
+                        if keypoints.shape[1] < 17 and keypoints.shape[1] != 33:
+                            logger.warning(
+                                f"⚠️ {model_name} produces {keypoints.shape[1]} keypoints, expected 17 (COCO) or 33 (MediaPipe/BlazePose)"
+                            )
+                            return False
+            else:
+                # Keypoints is not a numpy array, check if it's a list
+                if isinstance(keypoints, list):
+                    if len(keypoints) == 0:
+                        logger.info(
+                            f"ℹ️ {model_name} produced no detections on dummy image (this is normal)"
+                        )
+                        logger.info(
+                            f"✅ {model_name} is compatible with COCO evaluation (format check passed)"
+                        )
+                        return True
+                    else:
+                        logger.info(
+                            f"📊 {model_name} detected {len(keypoints)} persons (list format)"
+                        )
+                        if len(keypoints[0]) < 17:
+                            logger.warning(
+                                f"⚠️ {model_name} produces {len(keypoints[0])} keypoints, need at least 17 for COCO"
+                            )
+                            return False
+
+            logger.info(f"✅ {model_name} is compatible with COCO evaluation")
             return True
 
         except Exception as e:
-            logger.error(f"Model compatibility check failed: {e}")
+            model_name = getattr(model_wrapper, "model_name", "unknown")
+            logger.error(f"❌ {model_name} compatibility check failed: {e}")
+            import traceback
+
+            logger.error(f"📊 Full traceback:\n{traceback.format_exc()}")
             return False

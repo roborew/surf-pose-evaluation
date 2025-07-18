@@ -193,13 +193,52 @@ class YOLOv8Wrapper(BasePoseModel):
         boxes_data = yolo_result.boxes.xyxy.cpu().numpy()  # (N, 4)
         confidence_scores = yolo_result.boxes.conf.cpu().numpy()  # (N,)
 
+        # Check if we actually have valid data
+        if len(keypoints_data) == 0:
+            return {
+                "keypoints": np.array([]).reshape(0, 17, 2),
+                "scores": np.array([]).reshape(0, 17),
+                "bbox": np.array([]).reshape(0, 4),
+                "num_persons": 0,
+                "metadata": {
+                    "model": "yolov8_pose",
+                    "inference_time": inference_time,
+                    "model_size": self.model_size,
+                },
+            }
+
         num_persons = len(keypoints_data)
 
         # Separate keypoint coordinates and confidence scores
         keypoints_xy = keypoints_data[:, :, :2]  # (N, 17, 2)
         keypoints_conf = keypoints_data[:, :, 2]  # (N, 17)
 
-        # Filter by keypoint confidence threshold
+        # Check for malformed keypoints (debug logging for COCO evaluation)
+        if keypoints_xy.shape[1] != 17:
+            print(
+                f"⚠️ YOLOv8 Warning: Expected 17 keypoints, got {keypoints_xy.shape[1]}"
+            )
+            print(f"   Keypoints shape: {keypoints_xy.shape}")
+            print(f"   Scores shape: {keypoints_conf.shape}")
+            print(f"   Will pad/truncate to 17 keypoints")
+
+            # Ensure exactly 17 keypoints
+            fixed_keypoints = np.zeros((num_persons, 17, 2))
+            fixed_scores = np.zeros((num_persons, 17))
+
+            min_kpts = min(keypoints_xy.shape[1], 17)
+            fixed_keypoints[:, :min_kpts] = keypoints_xy[:, :min_kpts]
+            fixed_scores[:, :min_kpts] = keypoints_conf[:, :min_kpts]
+
+            keypoints_xy = fixed_keypoints
+            keypoints_conf = fixed_scores
+
+        # For COCO evaluation, don't filter by confidence threshold here
+        # Let the evaluation framework decide what to do with low confidence keypoints
+        # We'll set a minimum score of 0.01 for very low confidence keypoints
+        keypoints_conf = np.maximum(keypoints_conf, 0.01)
+
+        # Count valid keypoints (for metadata)
         valid_keypoints = keypoints_conf > self.keypoint_threshold
 
         return {
@@ -211,10 +250,11 @@ class YOLOv8Wrapper(BasePoseModel):
                 "model": "yolov8_pose",
                 "inference_time": inference_time,
                 "model_size": self.model_size,
-                "confidence_threshold": self.confidence_threshold,
+                "confidence_threshold": self.keypoint_threshold,
                 "iou_threshold": self.iou_threshold,
                 "detection_scores": confidence_scores,
                 "valid_keypoints": valid_keypoints.sum(),
+                "total_keypoints": keypoints_conf.size,
             },
         }
 
