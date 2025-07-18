@@ -291,9 +291,9 @@ def generate_summary_report(
                     "inference_time_ms": run.get(
                         "metrics.perf_avg_inference_time_mean", None
                     ),
-                    "memory_usage_gb": run.get(
+                    "memory_usage_mb": run.get(
                         "metrics.perf_max_memory_usage_mean", None
-                    ),
+                    ),  # Already in MB from the evaluator
                 },
             }
             summary["results"].append(model_result)
@@ -312,24 +312,32 @@ def generate_summary_report(
 
         for result in summary["results"]:
             print(f"\n📍 {result['model'].upper()}")
-            
+
             # Handle None values safely
-            pck_error = result['accuracy']['pck_error_mean']
-            detection_f1 = result['accuracy']['detection_f1']
-            fps = result['performance']['fps_mean']
-            inference_time = result['performance']['inference_time_ms']
-            
+            pck_error = result["accuracy"]["pck_error_mean"]
+            detection_f1 = result["accuracy"]["detection_f1"]
+            fps = result["performance"]["fps_mean"]
+            inference_time = result["performance"]["inference_time_ms"]
+
             print(
-                f"   • Accuracy (PCK Error): {pck_error:.4f}" if pck_error is not None else "   • Accuracy (PCK Error): N/A"
+                f"   • Accuracy (PCK Error): {pck_error:.4f}"
+                if pck_error is not None
+                else "   • Accuracy (PCK Error): N/A"
             )
             print(
-                f"   • Detection F1: {detection_f1:.4f}" if detection_f1 is not None else "   • Detection F1: N/A"
+                f"   • Detection F1: {detection_f1:.4f}"
+                if detection_f1 is not None
+                else "   • Detection F1: N/A"
             )
             print(
-                f"   • Speed (FPS): {fps:.2f}" if fps is not None else "   • Speed (FPS): N/A"
+                f"   • Speed (FPS): {fps:.2f}"
+                if fps is not None
+                else "   • Speed (FPS): N/A"
             )
             print(
-                f"   • Inference Time: {inference_time:.2f}ms" if inference_time is not None else "   • Inference Time: N/A"
+                f"   • Inference Time: {inference_time:.2f}ms"
+                if inference_time is not None
+                else "   • Inference Time: N/A"
             )
 
         return True

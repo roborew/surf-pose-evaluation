@@ -300,7 +300,9 @@ class PoseEvaluator:
 
             inference_times.append(inference_time)
             if self.device == "cuda":
-                memory_usage.append(torch.cuda.memory_allocated())
+                memory_usage.append(
+                    torch.cuda.memory_allocated() / (1024**2)
+                )  # Convert bytes to MB
             pose_results.append(pose_result)
 
         # Generate prediction files if enabled

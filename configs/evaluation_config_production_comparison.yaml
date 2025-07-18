@@ -130,7 +130,7 @@ output:
 #       - "mpjpe"
 #     performance:
 #       - "inference_latency_ms"
-#       - "memory_usage_gb"
+#       - "memory_usage_mb"
 #       - "throughput_fps"
 #       - "model_size_mb"
 #
