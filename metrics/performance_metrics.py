@@ -4,434 +4,437 @@ Performance metrics for pose estimation models
 
 import time
 import psutil
-import threading
-from typing import Dict, List, Any, Optional
 import numpy as np
 import torch
-import gc
+from typing import Dict, List, Any, Optional, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class PerformanceMetrics:
-    """Performance measurement utilities for pose estimation models"""
+    """Comprehensive performance metrics for pose estimation models"""
 
     def __init__(self, device: str = "cpu"):
         """Initialize performance metrics
 
         Args:
-            device: Compute device ('cpu', 'cuda', 'mps')
+            device: Device to monitor (cpu, cuda, mps)
         """
         self.device = device
-        self.reset_counters()
-
-    def reset_counters(self):
-        """Reset all performance counters"""
-        self.inference_times = []
-        self.memory_usage = []
-        self.cpu_usage = []
-        self.gpu_memory_usage = []
-        self.throughput_samples = []
-
-    def start_monitoring(self, monitor_system: bool = True):
-        """Start system resource monitoring
-
-        Args:
-            monitor_system: Whether to monitor system-wide resources
-        """
-        self.monitoring = True
-        if monitor_system:
-            self.monitor_thread = threading.Thread(target=self._monitor_resources)
-            self.monitor_thread.daemon = True
-            self.monitor_thread.start()
-
-    def stop_monitoring(self):
-        """Stop system resource monitoring"""
-        self.monitoring = False
-        if hasattr(self, "monitor_thread"):
-            self.monitor_thread.join(timeout=1.0)
+        self.process = psutil.Process()
 
     def measure_inference_time(
-        self, model, input_data, num_runs: int = 1
+        self, model, test_frame: np.ndarray, num_runs: int = 10, warmup_runs: int = 3
     ) -> Dict[str, float]:
-        """Measure inference time for a model
+        """Measure detailed inference timing metrics
 
         Args:
-            model: Model to benchmark
-            input_data: Input data for inference
-            num_runs: Number of inference runs
+            model: Pose estimation model
+            test_frame: Test frame for inference
+            num_runs: Number of inference runs to measure
+            warmup_runs: Number of warmup runs
 
         Returns:
             Dictionary with timing metrics
         """
-        times = []
-
         # Warmup runs
-        for _ in range(min(3, num_runs)):
-            _ = model.predict(input_data)
+        for _ in range(warmup_runs):
+            try:
+                _ = model.predict(test_frame)
+            except Exception as e:
+                logger.warning(f"Warmup run failed: {e}")
+                continue
 
-        # Synchronize GPU if using CUDA
-        if self.device == "cuda" and torch.cuda.is_available():
-            torch.cuda.synchronize()
+        # Actual timing measurements
+        inference_times = []
+        preprocess_times = []
+        postprocess_times = []
 
-        # Actual timing runs
         for _ in range(num_runs):
-            start_time = time.perf_counter()
+            try:
+                # Measure total inference time
+                start_time = time.perf_counter()
+                result = model.predict(test_frame)
+                end_time = time.perf_counter()
 
-            result = model.predict(input_data)
+                total_time = (end_time - start_time) * 1000  # Convert to ms
+                inference_times.append(total_time)
 
-            # Synchronize GPU
-            if self.device == "cuda" and torch.cuda.is_available():
-                torch.cuda.synchronize()
+                # Try to get detailed timing if available
+                if hasattr(model, "get_timing_breakdown"):
+                    timing_breakdown = model.get_timing_breakdown()
+                    preprocess_times.append(
+                        timing_breakdown.get("preprocess_time_ms", 0)
+                    )
+                    postprocess_times.append(
+                        timing_breakdown.get("postprocess_time_ms", 0)
+                    )
 
-            end_time = time.perf_counter()
-            inference_time = (end_time - start_time) * 1000  # Convert to ms
-            times.append(inference_time)
+            except Exception as e:
+                logger.warning(f"Inference timing run failed: {e}")
+                continue
 
-        self.inference_times.extend(times)
+        if not inference_times:
+            return {}
 
-        return {
-            "mean_inference_time_ms": np.mean(times),
-            "std_inference_time_ms": np.std(times),
-            "min_inference_time_ms": np.min(times),
-            "max_inference_time_ms": np.max(times),
-            "median_inference_time_ms": np.median(times),
-            "fps": 1000.0 / np.mean(times),
+        # Calculate timing statistics
+        timing_metrics = {
+            "avg_inference_time_ms": np.mean(inference_times),
+            "min_inference_time_ms": np.min(inference_times),
+            "max_inference_time_ms": np.max(inference_times),
+            "std_inference_time_ms": np.std(inference_times),
+            "median_inference_time_ms": np.median(inference_times),
+            "p95_inference_time_ms": np.percentile(inference_times, 95),
+            "p99_inference_time_ms": np.percentile(inference_times, 99),
+            "fps": 1000.0 / np.mean(inference_times),
+            "throughput_fps": 1000.0 / np.mean(inference_times),
         }
 
-    def measure_memory_usage(self, model, input_data) -> Dict[str, float]:
-        """Measure memory usage during inference
+        # Add detailed timing if available
+        if preprocess_times:
+            timing_metrics.update(
+                {
+                    "avg_preprocess_time_ms": np.mean(preprocess_times),
+                    "avg_postprocess_time_ms": np.mean(postprocess_times),
+                    "preprocess_ratio": np.mean(preprocess_times)
+                    / np.mean(inference_times),
+                    "postprocess_ratio": np.mean(postprocess_times)
+                    / np.mean(inference_times),
+                }
+            )
+
+        return timing_metrics
+
+    def measure_memory_usage(
+        self, model, test_frame: np.ndarray, num_runs: int = 5
+    ) -> Dict[str, float]:
+        """Measure detailed memory usage metrics
 
         Args:
-            model: Model to benchmark
-            input_data: Input data for inference
+            model: Pose estimation model
+            test_frame: Test frame for inference
+            num_runs: Number of runs to measure memory
 
         Returns:
             Dictionary with memory metrics
         """
-        # Force garbage collection
-        gc.collect()
+        memory_usage = []
+        peak_memory_usage = []
+        memory_after_gc = []
 
-        # Measure baseline memory
-        baseline_memory = self._get_memory_usage()
+        for _ in range(num_runs):
+            try:
+                # Measure memory before inference
+                memory_before = self._get_current_memory_mb()
 
-        # Run inference and measure peak memory
-        peak_memory = baseline_memory.copy()
+                # Run inference
+                result = model.predict(test_frame)
 
-        if self.device == "cuda" and torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats()
-            torch.cuda.empty_cache()
+                # Measure memory after inference
+                memory_after = self._get_current_memory_mb()
+                memory_usage.append(memory_after - memory_before)
 
-        # Single inference run
-        result = model.predict(input_data)
+                # Measure peak memory
+                peak_memory = self._get_peak_memory_mb()
+                peak_memory_usage.append(peak_memory)
 
-        # Measure peak memory
-        current_memory = self._get_memory_usage()
+                # Force garbage collection and measure
+                if hasattr(torch, "cuda") and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                memory_after_gc.append(self._get_current_memory_mb())
 
-        for key in current_memory:
-            peak_memory[key] = max(peak_memory[key], current_memory[key])
+            except Exception as e:
+                logger.warning(f"Memory measurement run failed: {e}")
+                continue
 
-        # Calculate memory increase
-        memory_increase = {}
-        for key in baseline_memory:
-            memory_increase[f"{key}_increase_mb"] = (
-                peak_memory[key] - baseline_memory[key]
-            )
+        if not memory_usage:
+            return {}
 
-        return {
-            **memory_increase,
-            **{f"{key}_baseline_mb": value for key, value in baseline_memory.items()},
-            **{f"{key}_peak_mb": value for key, value in peak_memory.items()},
+        # Calculate memory statistics
+        memory_metrics = {
+            "avg_memory_increase_mb": np.mean(memory_usage),
+            "max_memory_increase_mb": np.max(memory_usage),
+            "std_memory_increase_mb": np.std(memory_usage),
+            "avg_peak_memory_mb": np.mean(peak_memory_usage),
+            "max_peak_memory_mb": np.max(peak_memory_usage),
         }
 
+        if memory_after_gc:
+            memory_metrics.update(
+                {
+                    "avg_memory_after_gc_mb": np.mean(memory_after_gc),
+                    "memory_leak_mb": (
+                        np.mean(memory_after_gc) - memory_before
+                        if "memory_before" in locals()
+                        else 0
+                    ),
+                }
+            )
+
+        return memory_metrics
+
     def measure_throughput(
-        self, model, input_batch: List, duration_seconds: float = 30.0
+        self, model, test_frames: List[np.ndarray], batch_size: int = 1
     ) -> Dict[str, float]:
-        """Measure model throughput
+        """Measure throughput metrics
 
         Args:
-            model: Model to benchmark
-            input_batch: Batch of input data
-            duration_seconds: Duration to run throughput test
+            model: Pose estimation model
+            test_frames: List of test frames
+            batch_size: Batch size for processing
 
         Returns:
             Dictionary with throughput metrics
         """
-        processed_samples = 0
-        start_time = time.time()
-        end_time = start_time + duration_seconds
+        if len(test_frames) < 2:
+            return {}
 
-        batch_times = []
+        # Measure single frame throughput
+        single_frame_times = []
+        for frame in test_frames[: min(10, len(test_frames))]:
+            try:
+                start_time = time.perf_counter()
+                _ = model.predict(frame)
+                end_time = time.perf_counter()
+                single_frame_times.append((end_time - start_time) * 1000)
+            except Exception as e:
+                logger.warning(f"Single frame throughput measurement failed: {e}")
+                continue
 
-        while time.time() < end_time:
-            batch_start = time.time()
+        # Measure batch processing if supported
+        batch_throughput = None
+        if hasattr(model, "predict_batch") and len(test_frames) >= batch_size:
+            try:
+                batch_frames = test_frames[:batch_size]
+                start_time = time.perf_counter()
+                _ = model.predict_batch(batch_frames)
+                end_time = time.perf_counter()
+                batch_time = (end_time - start_time) * 1000
+                batch_throughput = (batch_size * 1000) / batch_time
+            except Exception as e:
+                logger.warning(f"Batch throughput measurement failed: {e}")
 
-            # Process batch
-            results = model.predict_batch(input_batch)
-
-            batch_end = time.time()
-            batch_time = batch_end - batch_start
-            batch_times.append(batch_time)
-
-            processed_samples += len(input_batch)
-
-        total_time = time.time() - start_time
-
-        return {
-            "total_samples_processed": processed_samples,
-            "total_time_seconds": total_time,
-            "samples_per_second": processed_samples / total_time,
-            "mean_batch_time_ms": np.mean(batch_times) * 1000,
-            "std_batch_time_ms": np.std(batch_times) * 1000,
+        # Calculate throughput metrics
+        throughput_metrics = {
+            "avg_single_frame_time_ms": (
+                np.mean(single_frame_times) if single_frame_times else 0
+            ),
+            "single_frame_throughput_fps": (
+                1000.0 / np.mean(single_frame_times) if single_frame_times else 0
+            ),
+            "single_frame_throughput_std": (
+                np.std(single_frame_times) if single_frame_times else 0
+            ),
         }
 
-    def benchmark_model(
-        self,
-        model,
-        test_inputs: List,
-        num_timing_runs: int = 10,
-        throughput_duration: float = 30.0,
-    ) -> Dict[str, Any]:
-        """Comprehensive model benchmarking
-
-        Args:
-            model: Model to benchmark
-            test_inputs: List of test inputs
-            num_timing_runs: Number of timing measurement runs
-            throughput_duration: Duration for throughput test
-
-        Returns:
-            Comprehensive benchmark results
-        """
-        results = {}
-
-        if not test_inputs:
-            return {"error": "No test inputs provided"}
-
-        # Single input timing
-        single_input = test_inputs[0]
-        timing_metrics = self.measure_inference_time(
-            model, single_input, num_timing_runs
-        )
-        results.update(timing_metrics)
-
-        # Memory usage
-        memory_metrics = self.measure_memory_usage(model, single_input)
-        results.update(memory_metrics)
-
-        # Throughput (if multiple inputs available)
-        if len(test_inputs) > 1:
-            throughput_metrics = self.measure_throughput(
-                model, test_inputs[: min(10, len(test_inputs))], throughput_duration
+        if batch_throughput is not None:
+            throughput_metrics.update(
+                {
+                    "batch_throughput_fps": batch_throughput,
+                    "batch_efficiency": (
+                        batch_throughput / (1000.0 / np.mean(single_frame_times))
+                        if single_frame_times
+                        else 0
+                    ),
+                }
             )
-            results.update(throughput_metrics)
 
-        # Model information
-        model_info = model.get_model_info()
-        results["model_info"] = model_info
+        return throughput_metrics
 
-        # Device information
-        results["device_info"] = self._get_device_info()
-
-        return results
-
-    def compare_models(
-        self, models: Dict[str, Any], test_inputs: List
-    ) -> Dict[str, Dict]:
-        """Compare performance of multiple models
+    def measure_cpu_utilization(
+        self, model, test_frame: np.ndarray, duration_seconds: float = 5.0
+    ) -> Dict[str, float]:
+        """Measure CPU utilization during inference
 
         Args:
-            models: Dictionary of model_name -> model_instance
-            test_inputs: List of test inputs
+            model: Pose estimation model
+            test_frame: Test frame for inference
+            duration_seconds: Duration to measure CPU usage
 
         Returns:
-            Comparison results for all models
+            Dictionary with CPU metrics
         """
-        results = {}
+        cpu_percentages = []
+        start_time = time.time()
 
-        for model_name, model in models.items():
-            print(f"Benchmarking {model_name}...")
+        # Monitor CPU usage during repeated inference
+        while time.time() - start_time < duration_seconds:
             try:
-                model_results = self.benchmark_model(model, test_inputs)
-                results[model_name] = model_results
+                # Get CPU usage before inference
+                cpu_before = psutil.cpu_percent(interval=0.1)
+
+                # Run inference
+                _ = model.predict(test_frame)
+
+                # Get CPU usage after inference
+                cpu_after = psutil.cpu_percent(interval=0.1)
+
+                cpu_percentages.append(max(cpu_before, cpu_after))
+
             except Exception as e:
-                results[model_name] = {"error": str(e)}
-
-        # Add comparison summary
-        results["summary"] = self._create_comparison_summary(results)
-
-        return results
-
-    def _monitor_resources(self):
-        """Monitor system resources in background thread"""
-        while self.monitoring:
-            try:
-                # CPU usage
-                cpu_percent = psutil.cpu_percent(interval=0.1)
-                self.cpu_usage.append(cpu_percent)
-
-                # Memory usage
-                memory_info = psutil.virtual_memory()
-                self.memory_usage.append(memory_info.percent)
-
-                # GPU memory (if available)
-                if self.device == "cuda" and torch.cuda.is_available():
-                    gpu_memory = torch.cuda.memory_allocated() / 1024**3  # GB
-                    self.gpu_memory_usage.append(gpu_memory)
-
-                time.sleep(0.5)  # Sample every 500ms
-
-            except Exception:
+                logger.warning(f"CPU measurement failed: {e}")
                 break
 
-    def _get_memory_usage(self) -> Dict[str, float]:
-        """Get current memory usage
+        if not cpu_percentages:
+            return {}
 
-        Returns:
-            Dictionary with memory usage in MB
-        """
-        memory_usage = {}
-
-        # System RAM
-        memory_info = psutil.virtual_memory()
-        memory_usage["system_ram"] = memory_info.used / 1024**2
-
-        # Process memory
-        process = psutil.Process()
-        process_memory = process.memory_info()
-        memory_usage["process_ram"] = process_memory.rss / 1024**2
-
-        # GPU memory
-        if self.device == "cuda" and torch.cuda.is_available():
-            memory_usage["gpu_allocated"] = torch.cuda.memory_allocated() / 1024**2
-            memory_usage["gpu_reserved"] = torch.cuda.memory_reserved() / 1024**2
-            memory_usage["gpu_max_allocated"] = (
-                torch.cuda.max_memory_allocated() / 1024**2
-            )
-        elif self.device == "mps" and torch.backends.mps.is_available():
-            # MPS doesn't have direct memory querying, use process memory as proxy
-            memory_usage["mps_allocated"] = process_memory.rss / 1024**2
-
-        return memory_usage
-
-    def _get_device_info(self) -> Dict[str, Any]:
-        """Get device information
-
-        Returns:
-            Dictionary with device details
-        """
-        device_info = {
-            "device": self.device,
-            "cpu_count": psutil.cpu_count(),
-            "cpu_freq": psutil.cpu_freq()._asdict() if psutil.cpu_freq() else None,
-            "total_ram_gb": psutil.virtual_memory().total / 1024**3,
+        return {
+            "avg_cpu_utilization": np.mean(cpu_percentages),
+            "max_cpu_utilization": np.max(cpu_percentages),
+            "std_cpu_utilization": np.std(cpu_percentages),
+            "cpu_measurement_duration_s": duration_seconds,
         }
 
-        if self.device == "cuda" and torch.cuda.is_available():
-            device_info.update(
-                {
-                    "gpu_name": torch.cuda.get_device_name(),
-                    "gpu_count": torch.cuda.device_count(),
-                    "cuda_version": torch.version.cuda,
-                    "gpu_memory_gb": torch.cuda.get_device_properties(0).total_memory
-                    / 1024**3,
-                }
-            )
-        elif self.device == "mps" and torch.backends.mps.is_available():
-            device_info["mps_available"] = True
-
-        return device_info
-
-    def _create_comparison_summary(self, results: Dict[str, Dict]) -> Dict[str, Any]:
-        """Create comparison summary from benchmark results
+    def measure_model_efficiency(
+        self, model, test_frame: np.ndarray
+    ) -> Dict[str, float]:
+        """Measure model efficiency metrics
 
         Args:
-            results: Benchmark results for all models
+            model: Pose estimation model
+            test_frame: Test frame for inference
 
         Returns:
-            Summary comparison metrics
+            Dictionary with efficiency metrics
         """
-        summary = {
-            "fastest_model": None,
-            "most_memory_efficient": None,
-            "highest_throughput": None,
-            "speed_ranking": [],
-            "memory_ranking": [],
-            "throughput_ranking": [],
-        }
+        try:
+            # Get model size
+            model_size_mb = self._get_model_size_mb(model)
 
-        # Extract valid results (exclude errors)
-        valid_results = {
-            name: data
-            for name, data in results.items()
-            if "error" not in data and name != "summary"
-        }
+            # Measure inference time
+            timing_metrics = self.measure_inference_time(model, test_frame, num_runs=5)
 
-        if not valid_results:
-            return summary
+            # Measure memory usage
+            memory_metrics = self.measure_memory_usage(model, test_frame, num_runs=3)
 
-        # Speed comparison
-        speed_data = [
-            (name, data.get("mean_inference_time_ms", float("inf")))
-            for name, data in valid_results.items()
-        ]
-        speed_data.sort(key=lambda x: x[1])
-        summary["speed_ranking"] = speed_data
-        summary["fastest_model"] = speed_data[0][0] if speed_data else None
+            if not timing_metrics or not memory_metrics:
+                return {}
 
-        # Memory comparison
-        memory_data = [
-            (name, data.get("process_ram_peak_mb", float("inf")))
-            for name, data in valid_results.items()
-        ]
-        memory_data.sort(key=lambda x: x[1])
-        summary["memory_ranking"] = memory_data
-        summary["most_memory_efficient"] = memory_data[0][0] if memory_data else None
+            avg_inference_time = timing_metrics.get("avg_inference_time_ms", 0)
+            avg_memory_usage = memory_metrics.get("avg_memory_increase_mb", 0)
 
-        # Throughput comparison
-        throughput_data = [
-            (name, data.get("samples_per_second", 0))
-            for name, data in valid_results.items()
-        ]
-        throughput_data.sort(key=lambda x: x[1], reverse=True)
-        summary["throughput_ranking"] = throughput_data
-        summary["highest_throughput"] = (
-            throughput_data[0][0] if throughput_data else None
-        )
+            # Calculate efficiency metrics
+            efficiency_metrics = {
+                "model_size_mb": model_size_mb,
+                "inference_time_ms": avg_inference_time,
+                "memory_usage_mb": avg_memory_usage,
+                "speed_memory_ratio": avg_inference_time / max(avg_memory_usage, 1.0),
+                "efficiency_score": 1.0
+                / (
+                    1.0
+                    + avg_inference_time * avg_memory_usage / max(model_size_mb, 1.0)
+                ),
+                "throughput_per_mb": (
+                    (1000.0 / avg_inference_time) / max(model_size_mb, 1.0)
+                    if avg_inference_time > 0
+                    else 0
+                ),
+            }
 
-        return summary
+            return efficiency_metrics
 
-    def get_monitoring_summary(self) -> Dict[str, float]:
-        """Get summary of monitored resources
+        except Exception as e:
+            logger.warning(f"Model efficiency measurement failed: {e}")
+            return {}
+
+    def _get_current_memory_mb(self) -> float:
+        """Get current memory usage in MB"""
+        if self.device == "cuda" and torch.cuda.is_available():
+            return torch.cuda.memory_allocated() / (1024**2)
+        elif self.device == "mps" and hasattr(torch.mps, "current_allocated_memory"):
+            try:
+                return torch.mps.current_allocated_memory() / (1024**2)
+            except Exception:
+                pass
+
+        # Fallback to process memory
+        return self.process.memory_info().rss / (1024**2)
+
+    def _get_peak_memory_mb(self) -> float:
+        """Get peak memory usage in MB"""
+        if self.device == "cuda" and torch.cuda.is_available():
+            return torch.cuda.max_memory_allocated() / (1024**2)
+        elif self.device == "mps" and hasattr(torch.mps, "current_allocated_memory"):
+            try:
+                return torch.mps.current_allocated_memory() / (1024**2)
+            except Exception:
+                pass
+
+        # Fallback to process memory
+        return self.process.memory_info().rss / (1024**2)
+
+    def _get_model_size_mb(self, model) -> float:
+        """Get model size in MB"""
+        try:
+            # Try to get from model's performance metrics
+            if hasattr(model, "get_performance_metrics"):
+                metrics = model.get_performance_metrics()
+                return metrics.get("model_size_mb", 0.0)
+
+            # Try to calculate from model parameters
+            if hasattr(model, "model") and hasattr(model.model, "parameters"):
+                total_params = sum(p.numel() for p in model.model.parameters())
+                # Rough estimate: 4 bytes per parameter for float32
+                return total_params * 4 / (1024**2)
+
+            # Fallback to default estimates based on model type
+            model_name = model.__class__.__name__.lower()
+            if "mediapipe" in model_name:
+                return 5.0
+            elif "blazepose" in model_name:
+                return 150.0
+            elif "mmpose" in model_name:
+                return 180.0
+            elif "yolo" in model_name:
+                return 6.2
+            elif "pytorch" in model_name:
+                return 25.0
+            else:
+                return 50.0  # Default estimate
+
+        except Exception as e:
+            logger.warning(f"Failed to get model size: {e}")
+            return 50.0  # Default fallback
+
+    def get_comprehensive_metrics(
+        self, model, test_frames: List[np.ndarray]
+    ) -> Dict[str, float]:
+        """Get comprehensive performance metrics
+
+        Args:
+            model: Pose estimation model
+            test_frames: List of test frames
 
         Returns:
-            Summary of resource usage during monitoring
+            Dictionary with all performance metrics
         """
-        summary = {}
+        if not test_frames:
+            return {}
 
-        if self.cpu_usage:
-            summary.update(
-                {
-                    "mean_cpu_usage_percent": np.mean(self.cpu_usage),
-                    "max_cpu_usage_percent": np.max(self.cpu_usage),
-                    "std_cpu_usage_percent": np.std(self.cpu_usage),
-                }
-            )
+        test_frame = test_frames[0]
 
-        if self.memory_usage:
-            summary.update(
-                {
-                    "mean_memory_usage_percent": np.mean(self.memory_usage),
-                    "max_memory_usage_percent": np.max(self.memory_usage),
-                    "std_memory_usage_percent": np.std(self.memory_usage),
-                }
-            )
+        # Collect all metrics
+        all_metrics = {}
 
-        if self.gpu_memory_usage:
-            summary.update(
-                {
-                    "mean_gpu_memory_gb": np.mean(self.gpu_memory_usage),
-                    "max_gpu_memory_gb": np.max(self.gpu_memory_usage),
-                    "std_gpu_memory_gb": np.std(self.gpu_memory_usage),
-                }
-            )
+        # Timing metrics
+        timing_metrics = self.measure_inference_time(model, test_frame)
+        all_metrics.update(timing_metrics)
 
-        return summary
+        # Memory metrics
+        memory_metrics = self.measure_memory_usage(model, test_frame)
+        all_metrics.update(memory_metrics)
+
+        # Throughput metrics
+        throughput_metrics = self.measure_throughput(model, test_frames)
+        all_metrics.update(throughput_metrics)
+
+        # CPU metrics
+        cpu_metrics = self.measure_cpu_utilization(model, test_frame)
+        all_metrics.update(cpu_metrics)
+
+        # Efficiency metrics
+        efficiency_metrics = self.measure_model_efficiency(model, test_frame)
+        all_metrics.update(efficiency_metrics)
+
+        return all_metrics

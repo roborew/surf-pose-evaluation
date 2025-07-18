@@ -285,6 +285,35 @@ def generate_summary_report(
                 "accuracy": {
                     "pck_error_mean": run.get("metrics.pose_pck_error_mean", None),
                     "detection_f1": run.get("metrics.pose_detection_f1_mean", None),
+                    # Enhanced detection metrics
+                    "pose_stability_mean": run.get(
+                        "metrics.pose_pose_stability_mean_mean", None
+                    ),
+                    "keypoint_consistency_mean": run.get(
+                        "metrics.pose_keypoint_consistency_mean_mean", None
+                    ),
+                    "avg_keypoint_confidence": run.get(
+                        "metrics.pose_avg_keypoint_confidence_mean", None
+                    ),
+                    "skeleton_completeness_mean": run.get(
+                        "metrics.pose_skeleton_completeness_mean_mean", None
+                    ),
+                    "detection_consistency": run.get(
+                        "metrics.pose_detection_consistency_mean", None
+                    ),
+                    # Consensus-based metrics
+                    "relative_pck_error": run.get(
+                        "metrics.pose_relative_pck_error_mean", None
+                    ),
+                    "relative_pck_0.2": run.get(
+                        "metrics.pose_relative_pck_0.2_mean", None
+                    ),
+                    "consensus_coverage": run.get(
+                        "metrics.pose_consensus_coverage_mean", None
+                    ),
+                    "consensus_confidence": run.get(
+                        "metrics.pose_consensus_confidence_mean", None
+                    ),
                 },
                 "performance": {
                     "fps_mean": run.get("metrics.perf_fps_mean", None),
@@ -296,12 +325,45 @@ def generate_summary_report(
                     ),  # Already in MB from the evaluator
                     # Add new model characteristics
                     "model_size_mb": run.get("metrics.perf_model_size_mb_mean", None),
-                    "memory_efficiency": run.get("metrics.perf_memory_efficiency_mean", None),
-                    "theoretical_fps": run.get("metrics.perf_theoretical_fps_mean", None),
+                    "memory_efficiency": run.get(
+                        "metrics.perf_memory_efficiency_mean", None
+                    ),
+                    "theoretical_fps": run.get(
+                        "metrics.perf_theoretical_fps_mean", None
+                    ),
                     # Enhanced memory metrics
-                    "avg_memory_usage": run.get("metrics.perf_avg_memory_usage_mean", None),
+                    "avg_memory_usage": run.get(
+                        "metrics.perf_avg_memory_usage_mean", None
+                    ),
                     "memory_std": run.get("metrics.perf_memory_std_mean", None),
-                    "memory_peak_to_avg_ratio": run.get("metrics.perf_memory_peak_to_avg_ratio_mean", None),
+                    "memory_peak_to_avg_ratio": run.get(
+                        "metrics.perf_memory_peak_to_avg_ratio_mean", None
+                    ),
+                    # Comprehensive performance metrics
+                    "avg_cpu_utilization": run.get(
+                        "metrics.perf_avg_cpu_utilization_mean", None
+                    ),
+                    "efficiency_score": run.get(
+                        "metrics.perf_efficiency_score_mean", None
+                    ),
+                    "throughput_per_mb": run.get(
+                        "metrics.perf_throughput_per_mb_mean", None
+                    ),
+                    "speed_memory_ratio": run.get(
+                        "metrics.perf_speed_memory_ratio_mean", None
+                    ),
+                    "p95_inference_time_ms": run.get(
+                        "metrics.perf_p95_inference_time_ms_mean", None
+                    ),
+                    "p99_inference_time_ms": run.get(
+                        "metrics.perf_p99_inference_time_ms_mean", None
+                    ),
+                    "single_frame_throughput_fps": run.get(
+                        "metrics.perf_single_frame_throughput_fps_mean", None
+                    ),
+                    "batch_throughput_fps": run.get(
+                        "metrics.perf_batch_throughput_fps_mean", None
+                    ),
                 },
             }
             summary["results"].append(model_result)
@@ -309,23 +371,30 @@ def generate_summary_report(
         # Add summary statistics
         if summary["results"]:
             # Calculate best performers
-            valid_results = [r for r in summary["results"] if r["performance"]["fps_mean"] is not None]
+            valid_results = [
+                r
+                for r in summary["results"]
+                if r["performance"]["fps_mean"] is not None
+            ]
             if valid_results:
                 # Best FPS
-                best_fps = max(valid_results, key=lambda x: x["performance"]["fps_mean"] or 0)
+                best_fps = max(
+                    valid_results, key=lambda x: x["performance"]["fps_mean"] or 0
+                )
                 summary["best_performers"] = {
                     "fastest_model": best_fps["model"],
                     "fastest_fps": best_fps["performance"]["fps_mean"],
                     "most_memory_efficient": min(
-                        valid_results, 
-                        key=lambda x: x["performance"]["avg_memory_usage"] or float('inf')
+                        valid_results,
+                        key=lambda x: x["performance"]["avg_memory_usage"]
+                        or float("inf"),
                     )["model"],
                     "smallest_model": min(
                         valid_results,
-                        key=lambda x: x["performance"]["model_size_mb"] or float('inf')
+                        key=lambda x: x["performance"]["model_size_mb"] or float("inf"),
                     )["model"],
                 }
-        
+
         # Save summary
         summary_file = run_manager.run_dir / "production_evaluation_summary.json"
         with open(summary_file, "w") as f:
@@ -392,11 +461,82 @@ def generate_summary_report(
                 else "   • Memory Stability: N/A"
             )
 
+            # Display enhanced accuracy metrics
+            pose_stability = result["accuracy"]["pose_stability_mean"]
+            keypoint_consistency = result["accuracy"]["keypoint_consistency_mean"]
+            avg_confidence = result["accuracy"]["avg_keypoint_confidence"]
+            skeleton_completeness = result["accuracy"]["skeleton_completeness_mean"]
+
+            print(
+                f"   • Pose Stability: {pose_stability:.3f}"
+                if pose_stability is not None
+                else "   • Pose Stability: N/A"
+            )
+            print(
+                f"   • Keypoint Consistency: {keypoint_consistency:.3f}"
+                if keypoint_consistency is not None
+                else "   • Keypoint Consistency: N/A"
+            )
+            print(
+                f"   • Avg Confidence: {avg_confidence:.3f}"
+                if avg_confidence is not None
+                else "   • Avg Confidence: N/A"
+            )
+            print(
+                f"   • Skeleton Completeness: {skeleton_completeness:.3f}"
+                if skeleton_completeness is not None
+                else "   • Skeleton Completeness: N/A"
+            )
+
+            # Display comprehensive performance metrics
+            efficiency_score = result["performance"]["efficiency_score"]
+            throughput_per_mb = result["performance"]["throughput_per_mb"]
+            p95_inference = result["performance"]["p95_inference_time_ms"]
+
+            print(
+                f"   • Efficiency Score: {efficiency_score:.3f}"
+                if efficiency_score is not None
+                else "   • Efficiency Score: N/A"
+            )
+            print(
+                f"   • Throughput/MB: {throughput_per_mb:.1f}"
+                if throughput_per_mb is not None
+                else "   • Throughput/MB: N/A"
+            )
+            print(
+                f"   • P95 Inference: {p95_inference:.1f}ms"
+                if p95_inference is not None
+                else "   • P95 Inference: N/A"
+            )
+
+            # Display consensus-based accuracy metrics
+            relative_pck_error = result["accuracy"]["relative_pck_error"]
+            relative_pck_02 = result["accuracy"]["relative_pck_0.2"]
+            consensus_coverage = result["accuracy"]["consensus_coverage"]
+
+            print(
+                f"   • Relative PCK Error: {relative_pck_error:.4f}"
+                if relative_pck_error is not None
+                else "   • Relative PCK Error: N/A"
+            )
+            print(
+                f"   • Relative PCK@0.2: {relative_pck_02:.4f}"
+                if relative_pck_02 is not None
+                else "   • Relative PCK@0.2: N/A"
+            )
+            print(
+                f"   • Consensus Coverage: {consensus_coverage:.3f}"
+                if consensus_coverage is not None
+                else "   • Consensus Coverage: N/A"
+            )
+
         # Display best performers summary
         if "best_performers" in summary:
             print("\n" + "🏆 BEST PERFORMERS" + "=" * 45)
             best = summary["best_performers"]
-            print(f"   • Fastest Model: {best['fastest_model']} ({best['fastest_fps']:.1f} FPS)")
+            print(
+                f"   • Fastest Model: {best['fastest_model']} ({best['fastest_fps']:.1f} FPS)"
+            )
             print(f"   • Most Memory Efficient: {best['most_memory_efficient']}")
             print(f"   • Smallest Model: {best['smallest_model']}")
 

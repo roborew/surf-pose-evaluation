@@ -321,6 +321,349 @@ class PoseMetrics:
             "false_negatives": false_negatives,
         }
 
+    def calculate_enhanced_detection_metrics(
+        self, predictions: List[Dict[str, Any]]
+    ) -> Dict[str, float]:
+        """Calculate enhanced detection metrics without requiring ground truth
+
+        Args:
+            predictions: List of pose predictions
+
+        Returns:
+            Dictionary with enhanced detection metrics
+        """
+        if not predictions:
+            return {}
+
+        metrics = {}
+
+        # Pose stability metrics
+        stability_metrics = self._calculate_pose_stability(predictions)
+        metrics.update(stability_metrics)
+
+        # Keypoint consistency metrics
+        consistency_metrics = self._calculate_keypoint_consistency(predictions)
+        metrics.update(consistency_metrics)
+
+        # Quality metrics
+        quality_metrics = self._calculate_pose_quality_metrics(predictions)
+        metrics.update(quality_metrics)
+
+        # Completeness metrics
+        completeness_metrics = self._calculate_skeleton_completeness(predictions)
+        metrics.update(completeness_metrics)
+
+        # Multi-person handling metrics
+        multi_person_metrics = self._calculate_multi_person_metrics(predictions)
+        metrics.update(multi_person_metrics)
+
+        return metrics
+
+    def _calculate_pose_stability(
+        self, predictions: List[Dict[str, Any]]
+    ) -> Dict[str, float]:
+        """Calculate pose stability metrics across frames"""
+        if len(predictions) < 2:
+            return {}
+
+        stability_scores = []
+        jitter_scores = []
+
+        for i in range(len(predictions) - 1):
+            curr_pred = predictions[i]
+            next_pred = predictions[i + 1]
+
+            if "keypoints" not in curr_pred or "keypoints" not in next_pred:
+                continue
+
+            curr_kpts = curr_pred["keypoints"]
+            next_kpts = next_pred["keypoints"]
+
+            if len(curr_kpts) == 0 or len(next_kpts) == 0:
+                continue
+
+            # Calculate stability for each person
+            for person_idx in range(min(len(curr_kpts), len(next_kpts))):
+                curr_person = curr_kpts[person_idx]
+                next_person = next_kpts[person_idx]
+
+                if curr_person.shape != next_person.shape:
+                    continue
+
+                # Calculate keypoint movement
+                movement = np.linalg.norm(next_person - curr_person, axis=1)
+                avg_movement = np.mean(movement)
+
+                # Stability score (inverse of movement)
+                stability = 1.0 / (1.0 + avg_movement)
+                stability_scores.append(stability)
+
+                # Jitter score (standard deviation of movement)
+                jitter = np.std(movement)
+                jitter_scores.append(jitter)
+
+        if not stability_scores:
+            return {}
+
+        return {
+            "pose_stability_mean": np.mean(stability_scores),
+            "pose_stability_std": np.std(stability_scores),
+            "pose_jitter_mean": np.mean(jitter_scores),
+            "pose_jitter_std": np.std(jitter_scores),
+        }
+
+    def _calculate_keypoint_consistency(
+        self, predictions: List[Dict[str, Any]]
+    ) -> Dict[str, float]:
+        """Calculate keypoint consistency across frames"""
+        if len(predictions) < 3:
+            return {}
+
+        consistency_scores = []
+        confidence_stability = []
+
+        for i in range(len(predictions) - 2):
+            frame1 = predictions[i]
+            frame2 = predictions[i + 1]
+            frame3 = predictions[i + 2]
+
+            if not all("keypoints" in f for f in [frame1, frame2, frame3]):
+                continue
+
+            kpts1 = frame1["keypoints"]
+            kpts2 = frame2["keypoints"]
+            kpts3 = frame3["keypoints"]
+
+            if len(kpts1) == 0 or len(kpts2) == 0 or len(kpts3) == 0:
+                continue
+
+            # Calculate consistency for each person
+            for person_idx in range(min(len(kpts1), len(kpts2), len(kpts3))):
+                person1 = kpts1[person_idx]
+                person2 = kpts2[person_idx]
+                person3 = kpts3[person_idx]
+
+                if not all(p.shape == person1.shape for p in [person2, person3]):
+                    continue
+
+                # Calculate keypoint consistency (how well keypoints track across frames)
+                movement1 = np.linalg.norm(person2 - person1, axis=1)
+                movement2 = np.linalg.norm(person3 - person2, axis=1)
+
+                # Consistency: similar movement patterns
+                movement_diff = np.abs(movement2 - movement1)
+                consistency = 1.0 / (1.0 + np.mean(movement_diff))
+                consistency_scores.append(consistency)
+
+                # Confidence stability (if available)
+                if "scores" in frame1 and "scores" in frame2 and "scores" in frame3:
+                    scores1 = (
+                        frame1["scores"][person_idx]
+                        if person_idx < len(frame1["scores"])
+                        else []
+                    )
+                    scores2 = (
+                        frame2["scores"][person_idx]
+                        if person_idx < len(frame2["scores"])
+                        else []
+                    )
+                    scores3 = (
+                        frame3["scores"][person_idx]
+                        if person_idx < len(frame3["scores"])
+                        else []
+                    )
+
+                    if len(scores1) == len(scores2) == len(scores3):
+                        score_stability = 1.0 - np.std([scores1, scores2, scores3])
+                        confidence_stability.append(score_stability)
+
+        metrics = {}
+        if consistency_scores:
+            metrics.update(
+                {
+                    "keypoint_consistency_mean": np.mean(consistency_scores),
+                    "keypoint_consistency_std": np.std(consistency_scores),
+                }
+            )
+
+        if confidence_stability:
+            metrics.update(
+                {
+                    "confidence_stability_mean": np.mean(confidence_stability),
+                    "confidence_stability_std": np.std(confidence_stability),
+                }
+            )
+
+        return metrics
+
+    def _calculate_pose_quality_metrics(
+        self, predictions: List[Dict[str, Any]]
+    ) -> Dict[str, float]:
+        """Calculate pose quality metrics based on confidence and keypoint validity"""
+        all_confidences = []
+        valid_keypoint_ratios = []
+        high_confidence_ratios = []
+
+        for pred in predictions:
+            if "keypoints" not in pred:
+                continue
+
+            kpts = pred["keypoints"]
+            if len(kpts) == 0:
+                continue
+
+            for person_kpts in kpts:
+                # Extract confidence scores if available
+                if "scores" in pred:
+                    person_scores = pred["scores"][0] if len(pred["scores"]) > 0 else []
+                    if len(person_scores) > 0:
+                        all_confidences.extend(person_scores)
+
+                        # High confidence ratio (confidence > 0.7)
+                        high_conf_count = sum(1 for s in person_scores if s > 0.7)
+                        high_confidence_ratios.append(
+                            high_conf_count / len(person_scores)
+                        )
+
+                # Valid keypoint ratio (non-zero coordinates)
+                valid_count = 0
+                total_count = 0
+
+                for kpt in person_kpts:
+                    if len(kpt) >= 2:
+                        total_count += 1
+                        if kpt[0] != 0 or kpt[1] != 0:  # Non-zero coordinates
+                            valid_count += 1
+
+                if total_count > 0:
+                    valid_keypoint_ratios.append(valid_count / total_count)
+
+        metrics = {}
+
+        if all_confidences:
+            metrics.update(
+                {
+                    "avg_keypoint_confidence": np.mean(all_confidences),
+                    "confidence_std": np.std(all_confidences),
+                    "min_confidence": np.min(all_confidences),
+                    "max_confidence": np.max(all_confidences),
+                }
+            )
+
+        if high_confidence_ratios:
+            metrics.update(
+                {
+                    "high_confidence_ratio": np.mean(high_confidence_ratios),
+                }
+            )
+
+        if valid_keypoint_ratios:
+            metrics.update(
+                {
+                    "valid_keypoint_ratio": np.mean(valid_keypoint_ratios),
+                    "keypoint_completeness": np.mean(valid_keypoint_ratios),
+                }
+            )
+
+        return metrics
+
+    def _calculate_skeleton_completeness(
+        self, predictions: List[Dict[str, Any]]
+    ) -> Dict[str, float]:
+        """Calculate skeleton completeness metrics"""
+        completeness_scores = []
+        anatomical_validity_scores = []
+
+        for pred in predictions:
+            if "keypoints" not in pred:
+                continue
+
+            kpts = pred["keypoints"]
+            if len(kpts) == 0:
+                continue
+
+            for person_kpts in kpts:
+                if len(person_kpts) < 17:  # COCO format minimum
+                    continue
+
+                # Calculate completeness (how many keypoints are detected)
+                valid_kpts = sum(1 for kpt in person_kpts if kpt[0] != 0 or kpt[1] != 0)
+                completeness = valid_kpts / len(person_kpts)
+                completeness_scores.append(completeness)
+
+                # Anatomical validity (basic skeleton structure)
+                if len(person_kpts) >= 17:  # COCO format
+                    # Check if key anatomical points are present
+                    # Head, shoulders, hips, knees, ankles
+                    key_points = [0, 5, 6, 11, 12, 13, 14, 15, 16]  # COCO indices
+                    key_point_count = sum(
+                        1
+                        for i in key_points
+                        if i < len(person_kpts)
+                        and (person_kpts[i][0] != 0 or person_kpts[i][1] != 0)
+                    )
+                    anatomical_validity = key_point_count / len(key_points)
+                    anatomical_validity_scores.append(anatomical_validity)
+
+        metrics = {}
+
+        if completeness_scores:
+            metrics.update(
+                {
+                    "skeleton_completeness_mean": np.mean(completeness_scores),
+                    "skeleton_completeness_std": np.std(completeness_scores),
+                }
+            )
+
+        if anatomical_validity_scores:
+            metrics.update(
+                {
+                    "anatomical_validity_mean": np.mean(anatomical_validity_scores),
+                    "anatomical_validity_std": np.std(anatomical_validity_scores),
+                }
+            )
+
+        return metrics
+
+    def _calculate_multi_person_metrics(
+        self, predictions: List[Dict[str, Any]]
+    ) -> Dict[str, float]:
+        """Calculate multi-person handling metrics"""
+        person_counts = []
+        detection_consistency = []
+
+        for pred in predictions:
+            if "keypoints" not in pred:
+                continue
+
+            kpts = pred["keypoints"]
+            person_counts.append(len(kpts))
+
+        if not person_counts:
+            return {}
+
+        # Calculate detection consistency (how stable is person count)
+        if len(person_counts) > 1:
+            for i in range(len(person_counts) - 1):
+                consistency = 1.0 if person_counts[i] == person_counts[i + 1] else 0.0
+                detection_consistency.append(consistency)
+
+        metrics = {
+            "avg_persons_detected": np.mean(person_counts),
+            "max_persons_detected": np.max(person_counts),
+            "min_persons_detected": np.min(person_counts),
+            "person_count_std": np.std(person_counts),
+        }
+
+        if detection_consistency:
+            metrics.update(
+                {
+                    "detection_consistency": np.mean(detection_consistency),
+                }
+            )
+
+        return metrics
+
     def _match_predictions_to_gt(
         self, pred: Dict[str, Any], gt: Dict[str, Any]
     ) -> List[Tuple[int, int]]:
