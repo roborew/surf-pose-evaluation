@@ -294,10 +294,38 @@ def generate_summary_report(
                     "memory_usage_mb": run.get(
                         "metrics.perf_max_memory_usage_mean", None
                     ),  # Already in MB from the evaluator
+                    # Add new model characteristics
+                    "model_size_mb": run.get("metrics.perf_model_size_mb_mean", None),
+                    "memory_efficiency": run.get("metrics.perf_memory_efficiency_mean", None),
+                    "theoretical_fps": run.get("metrics.perf_theoretical_fps_mean", None),
+                    # Enhanced memory metrics
+                    "avg_memory_usage": run.get("metrics.perf_avg_memory_usage_mean", None),
+                    "memory_std": run.get("metrics.perf_memory_std_mean", None),
+                    "memory_peak_to_avg_ratio": run.get("metrics.perf_memory_peak_to_avg_ratio_mean", None),
                 },
             }
             summary["results"].append(model_result)
 
+        # Add summary statistics
+        if summary["results"]:
+            # Calculate best performers
+            valid_results = [r for r in summary["results"] if r["performance"]["fps_mean"] is not None]
+            if valid_results:
+                # Best FPS
+                best_fps = max(valid_results, key=lambda x: x["performance"]["fps_mean"] or 0)
+                summary["best_performers"] = {
+                    "fastest_model": best_fps["model"],
+                    "fastest_fps": best_fps["performance"]["fps_mean"],
+                    "most_memory_efficient": min(
+                        valid_results, 
+                        key=lambda x: x["performance"]["avg_memory_usage"] or float('inf')
+                    )["model"],
+                    "smallest_model": min(
+                        valid_results,
+                        key=lambda x: x["performance"]["model_size_mb"] or float('inf')
+                    )["model"],
+                }
+        
         # Save summary
         summary_file = run_manager.run_dir / "production_evaluation_summary.json"
         with open(summary_file, "w") as f:
@@ -318,6 +346,10 @@ def generate_summary_report(
             detection_f1 = result["accuracy"]["detection_f1"]
             fps = result["performance"]["fps_mean"]
             inference_time = result["performance"]["inference_time_ms"]
+            model_size = result["performance"]["model_size_mb"]
+            memory_efficiency = result["performance"]["memory_efficiency"]
+            avg_memory = result["performance"]["avg_memory_usage"]
+            memory_peak_ratio = result["performance"]["memory_peak_to_avg_ratio"]
 
             print(
                 f"   • Accuracy (PCK Error): {pck_error:.4f}"
@@ -339,6 +371,34 @@ def generate_summary_report(
                 if inference_time is not None
                 else "   • Inference Time: N/A"
             )
+            print(
+                f"   • Model Size: {model_size:.1f}MB"
+                if model_size is not None
+                else "   • Model Size: N/A"
+            )
+            print(
+                f"   • Avg Memory: {avg_memory:.1f}MB"
+                if avg_memory is not None
+                else "   • Avg Memory: N/A"
+            )
+            print(
+                f"   • Memory Efficiency: {memory_efficiency:.2f}"
+                if memory_efficiency is not None
+                else "   • Memory Efficiency: N/A"
+            )
+            print(
+                f"   • Memory Stability: {memory_peak_ratio:.2f}"
+                if memory_peak_ratio is not None
+                else "   • Memory Stability: N/A"
+            )
+
+        # Display best performers summary
+        if "best_performers" in summary:
+            print("\n" + "🏆 BEST PERFORMERS" + "=" * 45)
+            best = summary["best_performers"]
+            print(f"   • Fastest Model: {best['fastest_model']} ({best['fastest_fps']:.1f} FPS)")
+            print(f"   • Most Memory Efficient: {best['most_memory_efficient']}")
+            print(f"   • Smallest Model: {best['smallest_model']}")
 
         return True
 

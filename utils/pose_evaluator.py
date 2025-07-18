@@ -299,10 +299,30 @@ class PoseEvaluator:
             inference_time = time.time() - start_time
 
             inference_times.append(inference_time)
+
+            # Enhanced memory tracking for all device types
             if self.device == "cuda":
                 memory_usage.append(
                     torch.cuda.memory_allocated() / (1024**2)
                 )  # Convert bytes to MB
+            elif self.device == "mps":
+                # MPS memory tracking
+                try:
+                    mps_memory = torch.mps.current_allocated_memory() / (1024**2)
+                    memory_usage.append(mps_memory)
+                except Exception:
+                    # Fallback to process memory if MPS memory query fails
+                    import psutil
+
+                    process_memory = psutil.Process().memory_info().rss / (1024**2)
+                    memory_usage.append(process_memory)
+            else:
+                # CPU memory tracking via psutil
+                import psutil
+
+                process_memory = psutil.Process().memory_info().rss / (1024**2)
+                memory_usage.append(process_memory)
+
             pose_results.append(pose_result)
 
         # Generate prediction files if enabled
@@ -332,6 +352,13 @@ class PoseEvaluator:
                 f"Calculated detection metrics without ground truth for {maneuver.maneuver_id}"
             )
 
+        # Collect model performance characteristics
+        try:
+            model_performance = model.get_performance_metrics()
+        except Exception as e:
+            logging.warning(f"Failed to get model performance metrics: {e}")
+            model_performance = {}
+
         performance_metrics = {
             "avg_inference_time": np.mean(inference_times),
             "fps": 1.0 / np.mean(inference_times),
@@ -339,6 +366,21 @@ class PoseEvaluator:
             "total_frames": len(frames),
             "maneuver_type": maneuver.maneuver_type,
             "maneuver_duration": maneuver.duration,
+            # Add model characteristics
+            "model_size_mb": model_performance.get("model_size_mb", 0.0),
+            "theoretical_fps": model_performance.get("avg_inference_time_ms", 0.0),
+            "memory_efficiency": (
+                model_performance.get("model_size_mb", 1.0)
+                / max(max(memory_usage) if memory_usage else 1.0, 1.0)
+            ),
+            # Enhanced memory metrics
+            "avg_memory_usage": np.mean(memory_usage) if memory_usage else 0.0,
+            "memory_std": np.std(memory_usage) if memory_usage else 0.0,
+            "memory_peak_to_avg_ratio": (
+                max(memory_usage) / np.mean(memory_usage)
+                if memory_usage and np.mean(memory_usage) > 0
+                else 1.0
+            ),
         }
 
         return {"pose": pose_metrics, "performance": performance_metrics}

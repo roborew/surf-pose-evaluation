@@ -492,6 +492,9 @@ class MMPoseWrapper(BasePoseModel):
             "fps": getattr(self, "_last_fps", 0.0),
             "latency_ms": getattr(self, "_last_latency_ms", 0.0),
             "memory_mb": getattr(self, "_last_memory_mb", 0.0),
+            "model_size_mb": 180.0,  # MMPose model size estimate
+            "avg_inference_time_ms": getattr(self, "_last_latency_ms", 25.0),
+            "memory_usage_mb": getattr(self, "_last_memory_mb", 200.0),
         }
 
     def predict_batch(self, images: List[np.ndarray]) -> List[Dict[str, Any]]:
