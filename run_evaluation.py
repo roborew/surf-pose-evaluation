@@ -65,6 +65,12 @@ def parse_arguments():
         "--optuna-trials", type=int, help="Number of Optuna trials to run"
     )
     parser.add_argument(
+        "--coco-images",
+        type=int,
+        default=100,
+        help="Number of COCO images for ground truth validation (default: 100 for production accuracy)",
+    )
+    parser.add_argument(
         "--skip-optuna", action="store_true", help="Skip Optuna optimization phase"
     )
     parser.add_argument(
@@ -202,14 +208,16 @@ def run_coco_validation_phase(
     evaluator = PoseEvaluator(config)
     evaluator.run_manager = run_manager
 
-    logger.info("Running COCO validation for ground truth PCK scores")
+    logger.info(
+        f"Running COCO validation for ground truth PCK scores ({args.coco_images} images)"
+    )
 
     # Run COCO validation
     coco_results = evaluator.run_coco_validation_phase(
         models=args.models,
         coco_annotations_path=coco_annotations_path,
         coco_images_path=None,  # Will download images as needed
-        max_images=50,  # Reasonable subset for validation
+        max_images=args.coco_images,  # Configurable via --coco-images (default: 100)
     )
 
     logger.info("✅ COCO validation phase completed successfully")
@@ -966,6 +974,10 @@ def main():
                 results["coco_validation_phase"] = "completed"
                 results["configs_used"].append(coco_validation_result["config_path"])
                 results["coco_validation_results"] = coco_validation_result["results"]
+                results["coco_validation_config"] = {
+                    "max_images_requested": args.coco_images,
+                    "annotations_path": coco_annotations_path,
+                }
                 coco_results = coco_validation_result["results"]
             else:
                 logger.warning(
