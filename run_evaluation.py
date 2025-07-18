@@ -96,6 +96,19 @@ def run_optuna_phase(run_manager: RunManager, args, optuna_maneuvers: List) -> D
     with open(optuna_config_path, "r") as f:
         config = yaml.safe_load(f)
 
+    # Override config with command line arguments
+    if args.optuna_trials:
+        if "optuna" not in config:
+            config["optuna"] = {}
+        config["optuna"]["n_trials"] = args.optuna_trials
+        logger.info(
+            f"🔧 Overriding Optuna trials from command line: {args.optuna_trials}"
+        )
+
+        # Save updated config
+        with open(optuna_config_path, "w") as f:
+            yaml.safe_dump(config, f)
+
     # Initialize optimizer with pre-selected data
     optimizer = OptunaPoseOptimizer(config, run_manager)
 

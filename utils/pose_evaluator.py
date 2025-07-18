@@ -191,6 +191,43 @@ class PoseEvaluator:
 
         return result
 
+    def _create_model_wrapper(self, model_name: str):
+        """Create and initialize a model wrapper for the given model name
+
+        Args:
+            model_name: Name of the model to create
+
+        Returns:
+            Initialized model wrapper or None if failed
+        """
+        if model_name not in self.model_registry:
+            logging.error(f"Model {model_name} not found in registry")
+            return None
+
+        try:
+            # Load model configuration
+            model_config_path = f"configs/model_configs/{model_name}.yaml"
+            if Path(model_config_path).exists():
+                with open(model_config_path, "r") as f:
+                    model_config = yaml.safe_load(f)
+            else:
+                model_config = {}
+
+            # Load best parameters if available
+            best_params = self._load_best_params_from_optuna(model_name)
+            final_config = {**model_config, **best_params}
+
+            # Initialize model
+            model_class = self.model_registry[model_name]
+            model = model_class(device=self.device, **final_config)
+
+            logging.info(f"Successfully created model wrapper for {model_name}")
+            return model
+
+        except Exception as e:
+            logging.error(f"Failed to create model wrapper for {model_name}: {e}")
+            return None
+
     def _load_best_params_from_optuna(self, model_name: str) -> Dict:
         """Load best parameters from Optuna optimization results"""
         load_config = self.config.get("models", {}).get("load_best_params", {})
