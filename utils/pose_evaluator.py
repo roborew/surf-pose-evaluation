@@ -386,6 +386,13 @@ class PoseEvaluator:
             pose_metrics = self._calculate_detection_metrics_without_ground_truth(
                 pose_results
             )
+
+            # Add enhanced detection metrics
+            enhanced_metrics = self.pose_metrics.calculate_enhanced_detection_metrics(
+                pose_results
+            )
+            pose_metrics.update(enhanced_metrics)
+
             logging.debug(
                 f"Calculated detection metrics without ground truth for {maneuver.maneuver_id}"
             )
@@ -420,6 +427,14 @@ class PoseEvaluator:
                 else 1.0
             ),
         }
+
+        # Add comprehensive performance metrics
+        comprehensive_metrics = (
+            self.performance_metrics.calculate_comprehensive_metrics(
+                inference_times, memory_usage, model_performance
+            )
+        )
+        performance_metrics.update(comprehensive_metrics)
 
         return {"pose": pose_metrics, "performance": performance_metrics}
 

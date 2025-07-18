@@ -13,6 +13,7 @@ import yaml
 from pathlib import Path
 import time
 from typing import Dict, List, Optional
+import numpy as np
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent))
@@ -308,6 +309,130 @@ def run_comparison_phase(
     return {"config_path": comparison_config_path, "results": results}
 
 
+def run_consensus_phase(
+    run_manager: RunManager, args, comparison_maneuvers: List
+) -> Optional[Dict]:
+    """Run consensus evaluation phase to calculate relative PCK metrics"""
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Import consensus evaluator
+        from utils.consensus_evaluator import ConsensusEvaluator
+
+        # Load comparison config
+        comparison_config_files = list(
+            run_manager.run_dir.glob("comparison_config_*.yaml")
+        )
+        if not comparison_config_files:
+            logger.error("No comparison config found for consensus evaluation")
+            return None
+
+        with open(comparison_config_files[0], "r") as f:
+            config = yaml.safe_load(f)
+
+        # Initialize consensus evaluator with reference models
+        reference_models = ["pytorch_pose", "yolov8_pose", "mmpose"]
+        available_reference_models = [m for m in reference_models if m in args.models]
+
+        if len(available_reference_models) < 2:
+            logger.warning(
+                f"⚠️ Need at least 2 reference models for consensus, have {len(available_reference_models)}"
+            )
+            logger.warning("⏭️ Skipping consensus evaluation")
+            return None
+
+        logger.info(
+            f"🎯 Using reference models for consensus: {available_reference_models}"
+        )
+
+        consensus_evaluator = ConsensusEvaluator(
+            config, reference_models=available_reference_models
+        )
+
+        # Run consensus evaluation
+        consensus_results = consensus_evaluator.run_consensus_evaluation(
+            comparison_maneuvers, target_models=args.models, save_consensus=True
+        )
+
+        logger.info("✅ Consensus evaluation completed successfully")
+        return consensus_results
+
+    except ImportError:
+        logger.error(
+            "❌ ConsensusEvaluator not available - skipping consensus evaluation"
+        )
+        return None
+    except Exception as e:
+        logger.error(f"❌ Consensus evaluation failed: {e}")
+        return None
+
+
+def merge_consensus_with_comparison(
+    comparison_results: Dict[str, Dict], consensus_results: Dict[str, Dict]
+) -> Dict[str, Dict]:
+    """Merge consensus metrics into comparison results"""
+    logger = logging.getLogger(__name__)
+
+    merged_results = comparison_results.copy()
+
+    for model_name, consensus_data in consensus_results.items():
+        if model_name in merged_results:
+            # Extract consensus metrics
+            consensus_metrics = consensus_data.get("consensus_metrics", {})
+
+            if consensus_metrics:
+                # Calculate aggregated consensus metrics
+                all_relative_pck = []
+                all_relative_pck_02 = []
+                all_consensus_coverage = []
+                all_consensus_confidence = []
+
+                for maneuver_id, maneuver_metrics in consensus_metrics.items():
+                    relative_pck = maneuver_metrics.get("relative_pck", {})
+                    consensus_quality = maneuver_metrics.get("consensus_quality", {})
+
+                    if "relative_pck_error" in relative_pck:
+                        all_relative_pck.append(
+                            1.0 - relative_pck["relative_pck_error"]
+                        )
+                    if "relative_pck_0.2" in relative_pck:
+                        all_relative_pck_02.append(relative_pck["relative_pck_0.2"])
+                    if "consensus_coverage" in consensus_quality:
+                        all_consensus_coverage.append(
+                            consensus_quality["consensus_coverage"]
+                        )
+                    if "avg_consensus_confidence" in consensus_quality:
+                        all_consensus_confidence.append(
+                            consensus_quality["avg_consensus_confidence"]
+                        )
+
+                # Add aggregated metrics to model results
+                if all_relative_pck:
+                    merged_results[model_name]["pose_relative_pck_error_mean"] = (
+                        1.0 - np.mean(all_relative_pck)
+                    )
+                if all_relative_pck_02:
+                    merged_results[model_name]["pose_relative_pck_0.2_mean"] = np.mean(
+                        all_relative_pck_02
+                    )
+                if all_consensus_coverage:
+                    merged_results[model_name]["pose_consensus_coverage_mean"] = (
+                        np.mean(all_consensus_coverage)
+                    )
+                if all_consensus_confidence:
+                    merged_results[model_name]["pose_consensus_confidence_mean"] = (
+                        np.mean(all_consensus_confidence)
+                    )
+
+                logger.info(f"✅ Added consensus metrics for {model_name}")
+            else:
+                logger.warning(f"⚠️ No consensus metrics found for {model_name}")
+        else:
+            logger.warning(f"⚠️ Model {model_name} not found in comparison results")
+
+    return merged_results
+
+
 def generate_summary_report(
     run_manager: RunManager, models: list, max_clips: int = None
 ):
@@ -383,7 +508,20 @@ def generate_summary_report(
                     # Legacy PCK (usually null without ground truth)
                     "pck_error_mean": run.get("metrics.pose_pck_error_mean", None),
                     "detection_f1": run.get("metrics.pose_detection_f1_mean", None),
-                    # COCO Ground Truth Validation
+                    # Consensus-based metrics (pseudo ground truth) - PRIMARY METRICS
+                    "relative_pck_error": run.get(
+                        "metrics.pose_relative_pck_error_mean", None
+                    ),
+                    "relative_pck_0.2": run.get(
+                        "metrics.pose_relative_pck_0.2_mean", None
+                    ),
+                    "consensus_coverage": run.get(
+                        "metrics.pose_consensus_coverage_mean", None
+                    ),
+                    "consensus_confidence": run.get(
+                        "metrics.pose_consensus_confidence_mean", None
+                    ),
+                    # COCO Ground Truth Validation - REFERENCE METRICS
                     "coco_pck_0.1": run.get("metrics.coco_pck_0.1", None),
                     "coco_pck_0.2": run.get("metrics.coco_pck_0.2", None),
                     "coco_pck_0.3": run.get("metrics.coco_pck_0.3", None),
@@ -405,19 +543,6 @@ def generate_summary_report(
                     ),
                     "detection_consistency": run.get(
                         "metrics.pose_detection_consistency_mean", None
-                    ),
-                    # Consensus-based metrics (pseudo ground truth)
-                    "relative_pck_error": run.get(
-                        "metrics.pose_relative_pck_error_mean", None
-                    ),
-                    "relative_pck_0.2": run.get(
-                        "metrics.pose_relative_pck_0.2_mean", None
-                    ),
-                    "consensus_coverage": run.get(
-                        "metrics.pose_consensus_coverage_mean", None
-                    ),
-                    "consensus_confidence": run.get(
-                        "metrics.pose_consensus_confidence_mean", None
                     ),
                 },
                 "performance": {
@@ -544,8 +669,30 @@ def generate_summary_report(
             coco_fps = result["performance"]["coco_fps_mean"]
             coco_images = result["performance"]["coco_images_processed"]
 
-            # Display COCO ground truth accuracy
-            print("   🏆 COCO Ground Truth Validation:")
+            # Display consensus-based accuracy metrics FIRST (primary metrics)
+            relative_pck_error = result["accuracy"]["relative_pck_error"]
+            relative_pck_02 = result["accuracy"]["relative_pck_0.2"]
+            consensus_coverage = result["accuracy"]["consensus_coverage"]
+
+            print("   🎯 Consensus-based Accuracy (Primary):")
+            print(
+                f"     • Relative PCK Error: {relative_pck_error:.4f}"
+                if relative_pck_error is not None
+                else "     • Relative PCK Error: N/A"
+            )
+            print(
+                f"     • Relative PCK@0.2: {relative_pck_02:.4f}"
+                if relative_pck_02 is not None
+                else "     • Relative PCK@0.2: N/A"
+            )
+            print(
+                f"     • Consensus Coverage: {consensus_coverage:.3f}"
+                if consensus_coverage is not None
+                else "     • Consensus Coverage: N/A"
+            )
+
+            # Display COCO ground truth accuracy (reference metrics)
+            print("   🏆 COCO Ground Truth Validation (Reference):")
             print(
                 f"     • PCK@0.2: {coco_pck_02:.3f}"
                 if coco_pck_02 is not None
@@ -572,8 +719,8 @@ def generate_summary_report(
                 else "     • Images Tested: N/A"
             )
 
-            # Display legacy metrics
-            print("   📊 Production Dataset:")
+            # Display basic metrics
+            print("   📊 Basic Metrics:")
             print(
                 f"   • Legacy PCK Error: {pck_error:.4f}"
                 if pck_error is not None
@@ -827,9 +974,11 @@ def main():
                 logger.warning("⏭️ Skipping COCO validation phase")
                 results["coco_validation_phase"] = "skipped"
 
-        # Phase 3: Production Dataset Comparison
+        # Phase 3: Production Dataset Comparison (Multi-step)
         if not args.skip_comparison and not args.optuna_only:
             if comparison_maneuvers:
+                # Step 3a: Run individual model evaluations
+                logger.info("📊 Step 3a: Running individual model evaluations...")
                 comparison_result = run_comparison_phase(
                     run_manager,
                     args,
@@ -837,6 +986,21 @@ def main():
                     visualization_manifest_path,
                     coco_results,
                 )
+
+                # Step 3b: Run consensus evaluation to add relative PCK metrics
+                logger.info("🎯 Step 3b: Calculating consensus-based metrics...")
+                consensus_result = run_consensus_phase(
+                    run_manager, args, comparison_maneuvers
+                )
+
+                # Step 3c: Merge consensus results into comparison results
+                if consensus_result and comparison_result:
+                    merged_results = merge_consensus_with_comparison(
+                        comparison_result["results"], consensus_result
+                    )
+                    comparison_result["results"] = merged_results
+                    logger.info("✅ Merged consensus metrics with comparison results")
+
                 results["comparison_phase"] = "completed"
                 results["configs_used"].append(comparison_result["config_path"])
                 results["comparison_results"] = comparison_result["results"]
