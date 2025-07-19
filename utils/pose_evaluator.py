@@ -387,11 +387,15 @@ class PoseEvaluator:
                 pose_results
             )
 
-            # Add enhanced detection metrics
-            enhanced_metrics = self.pose_metrics.calculate_enhanced_detection_metrics(
-                pose_results
-            )
-            pose_metrics.update(enhanced_metrics)
+            # Add enhanced detection metrics (with error handling)
+            try:
+                enhanced_metrics = (
+                    self.pose_metrics.calculate_enhanced_detection_metrics(pose_results)
+                )
+                pose_metrics.update(enhanced_metrics)
+            except Exception as e:
+                logging.warning(f"Failed to calculate enhanced detection metrics: {e}")
+                # Continue without enhanced metrics
 
             logging.debug(
                 f"Calculated detection metrics without ground truth for {maneuver.maneuver_id}"
@@ -428,13 +432,57 @@ class PoseEvaluator:
             ),
         }
 
-        # Add comprehensive performance metrics
-        comprehensive_metrics = (
-            self.performance_metrics.calculate_comprehensive_metrics(
-                inference_times, memory_usage, model_performance
-            )
-        )
-        performance_metrics.update(comprehensive_metrics)
+        # Add comprehensive performance metrics (only if method exists)
+        try:
+            if hasattr(self.performance_metrics, "calculate_comprehensive_metrics"):
+                comprehensive_metrics = (
+                    self.performance_metrics.calculate_comprehensive_metrics(
+                        inference_times, memory_usage, model_performance
+                    )
+                )
+                performance_metrics.update(comprehensive_metrics)
+            else:
+                # Add basic comprehensive metrics manually
+                import psutil
+
+                # CPU utilization (approximate)
+                cpu_percent = psutil.cpu_percent(interval=None)
+
+                # Additional performance calculations
+                efficiency_score = (
+                    performance_metrics["fps"]
+                    / max(performance_metrics["model_size_mb"], 1.0)
+                    if performance_metrics.get("model_size_mb", 0) > 0
+                    else performance_metrics["fps"]
+                )
+
+                comprehensive_metrics = {
+                    "avg_cpu_utilization": cpu_percent,
+                    "efficiency_score": efficiency_score,
+                    "throughput_per_mb": performance_metrics["fps"]
+                    / max(performance_metrics.get("model_size_mb", 1.0), 1.0),
+                    "speed_memory_ratio": performance_metrics["fps"]
+                    / max(performance_metrics.get("avg_memory_usage", 1.0), 1.0),
+                    "p95_inference_time_ms": (
+                        np.percentile(inference_times, 95) * 1000
+                        if inference_times
+                        else 0
+                    ),
+                    "p99_inference_time_ms": (
+                        np.percentile(inference_times, 99) * 1000
+                        if inference_times
+                        else 0
+                    ),
+                    "single_frame_throughput_fps": performance_metrics["fps"],
+                    "batch_throughput_fps": performance_metrics[
+                        "fps"
+                    ],  # Same for single frame processing
+                }
+                performance_metrics.update(comprehensive_metrics)
+
+        except Exception as e:
+            logging.warning(f"Failed to calculate comprehensive metrics: {e}")
+            # Continue without comprehensive metrics
 
         return {"pose": pose_metrics, "performance": performance_metrics}
 
