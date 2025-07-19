@@ -642,10 +642,24 @@ def generate_summary_report(
                     )["model"],
                 }
 
-        # Save summary
+        # Save summary (handle NaN values for JSON serialization)
         summary_file = run_manager.run_dir / "production_evaluation_summary.json"
+
+        # Replace any remaining NaN values with null for proper JSON
+        def replace_nan_recursive(obj):
+            if isinstance(obj, dict):
+                return {k: replace_nan_recursive(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [replace_nan_recursive(item) for item in obj]
+            elif isinstance(obj, float) and np.isnan(obj):
+                return None  # Convert NaN to null in JSON
+            else:
+                return obj
+
+        clean_summary = replace_nan_recursive(summary)
+
         with open(summary_file, "w") as f:
-            json.dump(summary, f, indent=2)
+            json.dump(clean_summary, f, indent=2)
 
         logger.info(f"📊 Summary report saved to {summary_file}")
 

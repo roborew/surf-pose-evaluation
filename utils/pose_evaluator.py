@@ -392,6 +392,13 @@ class PoseEvaluator:
                 enhanced_metrics = (
                     self.pose_metrics.calculate_enhanced_detection_metrics(pose_results)
                 )
+
+                # Replace NaN values with 0.0 for consistency
+                for key, value in enhanced_metrics.items():
+                    if isinstance(value, float) and np.isnan(value):
+                        enhanced_metrics[key] = 0.0
+                        logging.warning(f"Replaced NaN value in {key} with 0.0")
+
                 pose_metrics.update(enhanced_metrics)
             except Exception as e:
                 logging.warning(f"Failed to calculate enhanced detection metrics: {e}")
@@ -478,6 +485,15 @@ class PoseEvaluator:
                         "fps"
                     ],  # Same for single frame processing
                 }
+
+                # Replace NaN values in comprehensive metrics
+                for key, value in comprehensive_metrics.items():
+                    if isinstance(value, float) and np.isnan(value):
+                        comprehensive_metrics[key] = 0.0
+                        logging.warning(
+                            f"Replaced NaN value in comprehensive metric {key} with 0.0"
+                        )
+
                 performance_metrics.update(comprehensive_metrics)
 
         except Exception as e:

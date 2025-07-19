@@ -83,38 +83,92 @@ class ConsensusEvaluator:
         return evaluation_results
 
     def _run_reference_models(self, maneuvers: List):
-        """Run all reference models to collect predictions
+        """Load predictions from already-computed reference models
 
         Args:
             maneuvers: List of maneuvers to process
         """
         for model_name in self.reference_models:
             try:
-                logger.info(f"🔄 Running {model_name} for consensus generation...")
+                logger.info(f"📁 Loading existing predictions for {model_name}...")
 
                 # Check if model is available
                 if model_name not in self.pose_evaluator.get_available_models():
                     logger.warning(f"⚠️  {model_name} not available, skipping")
                     continue
 
-                # Run model evaluation
-                model_results = self.pose_evaluator.evaluate_single_model_with_data(
-                    model_name, maneuvers
-                )
+                # Try to load existing prediction files first
+                predictions = self._load_existing_predictions(model_name, maneuvers)
 
-                # Extract predictions from results
-                predictions = self._extract_predictions_from_results(
-                    model_results, maneuvers
-                )
-                self.all_model_predictions[model_name] = predictions
-
-                logger.info(
-                    f"✅ {model_name} completed with {len(predictions)} predictions"
-                )
+                if predictions:
+                    self.all_model_predictions[model_name] = predictions
+                    logger.info(
+                        f"✅ {model_name} loaded {len(predictions)} cached predictions"
+                    )
+                else:
+                    logger.warning(
+                        f"⚠️  No cached predictions found for {model_name}, skipping consensus for this model"
+                    )
+                    continue
 
             except Exception as e:
-                logger.error(f"❌ Failed to run {model_name}: {e}")
+                logger.error(f"❌ Failed to load predictions for {model_name}: {e}")
                 continue
+
+    def _load_existing_predictions(
+        self, model_name: str, maneuvers: List
+    ) -> Optional[List]:
+        """Load existing prediction files for a model
+
+        Args:
+            model_name: Name of the model
+            maneuvers: List of maneuvers
+
+        Returns:
+            List of predictions or None if not found
+        """
+        try:
+            # Check if pose evaluator has a prediction handler
+            if (
+                not hasattr(self.pose_evaluator, "prediction_handler")
+                or not self.pose_evaluator.prediction_handler
+            ):
+                logger.warning(
+                    f"No prediction handler available for loading {model_name} predictions"
+                )
+                return None
+
+            predictions = []
+
+            # Load prediction files for each maneuver
+            for maneuver in maneuvers:
+                try:
+                    # Try to load the prediction file for this maneuver
+                    prediction_file = self.pose_evaluator.prediction_handler._get_prediction_file_path(
+                        maneuver.maneuver_id, model_name
+                    )
+
+                    if prediction_file.exists():
+                        import json
+
+                        with open(prediction_file, "r") as f:
+                            prediction_data = json.load(f)
+                        predictions.append(prediction_data)
+                    else:
+                        logger.warning(f"Prediction file not found: {prediction_file}")
+                        return None  # If any prediction is missing, can't do consensus
+
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to load prediction for maneuver {maneuver.maneuver_id}: {e}"
+                    )
+                    return None
+
+            return predictions if predictions else None
+
+        except Exception as e:
+            logger.error(f"Error loading existing predictions for {model_name}: {e}")
+            return None
 
     def _extract_predictions_from_results(
         self, model_results: Dict, maneuvers: List
