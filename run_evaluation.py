@@ -89,10 +89,10 @@ def parse_arguments():
 
 
 def run_optuna_phase(run_manager: RunManager, args, optuna_maneuvers: List) -> Dict:
-    """Run Optuna optimization phase with pre-selected data"""
+    """Run Optuna optimization phase with pre-selected data and dynamic time allocation"""
     logger = logging.getLogger(__name__)
 
-    logger.info("🔍 Starting Optuna optimization phase...")
+    logger.info("🔍 Starting Optuna optimization phase with dynamic time allocation...")
 
     # Create Optuna-specific config
     optuna_config_path = run_manager.create_config_for_phase(
@@ -116,6 +116,11 @@ def run_optuna_phase(run_manager: RunManager, args, optuna_maneuvers: List) -> D
         with open(optuna_config_path, "w") as f:
             yaml.safe_dump(config, f)
 
+    # Initialize dynamic optimizer for intelligent time allocation
+    from utils.dynamic_optimizer import create_dynamic_optimizer_from_config
+
+    dynamic_optimizer = create_dynamic_optimizer_from_config(config)
+
     # Initialize optimizer with pre-selected data
     optimizer = OptunaPoseOptimizer(config, run_manager)
 
@@ -123,7 +128,7 @@ def run_optuna_phase(run_manager: RunManager, args, optuna_maneuvers: List) -> D
         f"Using pre-selected {len(optuna_maneuvers)} maneuvers for optimization"
     )
 
-    # Run optimization for each model
+    # Run optimization for each model with dynamic time allocation
     results = {}
     for model_name in args.models:
         # Check model availability using a temporary evaluator
@@ -132,15 +137,61 @@ def run_optuna_phase(run_manager: RunManager, args, optuna_maneuvers: List) -> D
             logger.warning(f"Model {model_name} not available, skipping")
             continue
 
-        logger.info(f"Optimizing {model_name}")
+        # Get allocated time for this model
+        allocated_time = dynamic_optimizer.get_time_for_model(model_name)
+        logger.info(
+            f"Optimizing {model_name} with {allocated_time/3600:.1f}h allocated time"
+        )
+
+        # Update config with model-specific timeout
+        if "optuna" not in config:
+            config["optuna"] = {}
+        config["optuna"]["timeout_minutes"] = int(allocated_time / 60)
+
+        # Run optimization
+        start_time = time.time()
         model_result = optimizer.optimize_model(model_name, optuna_maneuvers)
+        end_time = time.time()
+
+        # Track results for dynamic allocation
+        trials_completed = (
+            len(model_result.get("trials", [])) if isinstance(model_result, dict) else 0
+        )
+        best_score = (
+            model_result.get("pck_0_2", 0.0) if isinstance(model_result, dict) else 0.0
+        )
+        time_taken = end_time - start_time
+
+        # Check if early stopping occurred (this would need to be tracked in the optimizer)
+        early_stopped = False  # TODO: Track this in the optimizer
+
+        # Update dynamic optimizer
+        dynamic_optimizer.update_model_result(
+            model_name=model_name,
+            trials_completed=trials_completed,
+            best_score=best_score,
+            time_taken=time_taken,
+            early_stopped=early_stopped,
+        )
+
         results[model_name] = model_result
 
     # Save best parameters
     optimizer.save_best_parameters(results)
 
-    logger.info("✅ Optuna optimization completed successfully")
-    return {"config_path": optuna_config_path, "results": results}
+    # Save and display optimization summary
+    summary_path = run_manager.reports_dir / "dynamic_optimization_summary.json"
+    dynamic_optimizer.save_summary(summary_path)
+    dynamic_optimizer.print_summary()
+
+    logger.info(
+        "✅ Optuna optimization completed successfully with dynamic time allocation"
+    )
+    return {
+        "config_path": optuna_config_path,
+        "results": results,
+        "dynamic_summary": summary_path,
+    }
 
 
 # The extract_best_parameters function has been moved to OptunaPoseOptimizer class

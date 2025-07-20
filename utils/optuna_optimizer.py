@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Optuna Hyperparameter Optimization for Pose Models
-Handles hyperparameter search and optimization logic
+Handles hyperparameter search and optimization logic with intelligent early stopping
 """
 
 import logging
@@ -19,7 +19,7 @@ from utils.pose_evaluator import PoseEvaluator
 
 
 class OptunaPoseOptimizer:
-    """Handles Optuna hyperparameter optimization for pose models"""
+    """Handles Optuna hyperparameter optimization for pose models with intelligent early stopping"""
 
     def __init__(self, config: Dict, run_manager=None):
         """Initialize Optuna optimizer"""
@@ -28,12 +28,26 @@ class OptunaPoseOptimizer:
         self.evaluator = PoseEvaluator(config)
         self.evaluator.run_manager = run_manager  # Set run manager for visualizations
 
+        # Early stopping configuration
+        self.early_stopping_config = config.get("optuna", {}).get(
+            "early_stopping",
+            {
+                "enabled": True,
+                "patience": 10,  # Stop if no improvement for 10 trials
+                "min_trials": 15,  # Minimum trials before early stopping
+                "improvement_threshold": 0.001,  # Minimum improvement to continue
+                "plateau_threshold": 0.95,  # Consider plateaued if within 95% of best
+            },
+        )
+
     def optimize_model(self, model_name: str, maneuvers: List) -> Dict:
-        """Run Optuna optimization for a single model"""
+        """Run Optuna optimization for a single model with intelligent early stopping"""
         logging.info(f"Starting Optuna optimization for {model_name}")
 
         # Set MLflow experiment name from config
-        experiment_name = self.config.get("mlflow", {}).get("experiment_name", "surf_pose_optuna")
+        experiment_name = self.config.get("mlflow", {}).get(
+            "experiment_name", "surf_pose_optuna"
+        )
         mlflow.set_experiment(experiment_name)
         logging.info(f"MLflow experiment set to: {experiment_name}")
 
@@ -41,9 +55,11 @@ class OptunaPoseOptimizer:
         all_trial_results = []
         best_trial_result = None
         best_score = -float("inf")
+        trials_since_improvement = 0
+        start_time = time.time()
 
         def objective(trial):
-            nonlocal best_trial_result, best_score
+            nonlocal best_trial_result, best_score, trials_since_improvement
 
             # Sample hyperparameters
             config = self._sample_hyperparameters(trial, model_name)
@@ -98,8 +114,9 @@ class OptunaPoseOptimizer:
                 mlflow.log_metric("optuna_trial_score", trial_score)
                 mlflow.log_metric("num_maneuvers_processed", len(trial_metrics))
 
-                # Track best trial
-                if trial_score > best_score:
+                # Check for improvement
+                improvement = trial_score - best_score
+                if improvement > self.early_stopping_config["improvement_threshold"]:
                     best_score = trial_score
                     best_trial_result = {
                         "trial_number": trial.number,
@@ -107,15 +124,29 @@ class OptunaPoseOptimizer:
                         "score": trial_score,
                         "run_name": run_name,
                     }
+                    trials_since_improvement = 0
+                    print(
+                        f"   ✅ New best score: {trial_score:.4f} (improvement: {improvement:.4f})"
+                    )
+                else:
+                    trials_since_improvement += 1
+                    print(
+                        f"   • Trial score: {trial_score:.4f} (best: {best_score:.4f}, no improvement: {trials_since_improvement})"
+                    )
 
-                print(
-                    f"   • Trial score: {trial_score:.4f} (best so far: {best_score:.4f})"
-                )
+                # Early stopping check
+                if self._should_stop_early(
+                    trial.number, trials_since_improvement, trial_score, best_score
+                ):
+                    print(f"   🛑 Early stopping triggered after {trial.number} trials")
+                    raise optuna.exceptions.OptunaError("Early stopping triggered")
+
                 return trial_score
 
         # Create and run study
         study_name = f"{model_name}_optimization_{int(time.time())}"
         n_trials = self.config.get("optuna", {}).get("n_trials", 20)
+        max_timeout = self.config.get("optuna", {}).get("timeout_minutes", 300)
 
         study = optuna.create_study(
             direction="maximize",
@@ -126,17 +157,57 @@ class OptunaPoseOptimizer:
 
         print(f"\n🔍 Starting Optuna optimization for {model_name}")
         print(f"   • Study: {study_name}")
-        print(f"   • Trials: {n_trials}")
+        print(f"   • Max trials: {n_trials}")
+        print(f"   • Max timeout: {max_timeout} minutes")
+        print(f"   • Early stopping: {self.early_stopping_config['enabled']}")
 
         try:
-            timeout_minutes = self.config.get("optuna", {}).get("timeout_minutes", 60)
-            study.optimize(objective, n_trials=n_trials, timeout=timeout_minutes * 60)
+            study.optimize(objective, n_trials=n_trials, timeout=max_timeout * 60)
+        except optuna.exceptions.OptunaError as e:
+            if "Early stopping triggered" in str(e):
+                logging.info(f"Early stopping triggered for {model_name}")
+            else:
+                logging.warning(f"Optimization interrupted: {e}")
         except (KeyboardInterrupt, Exception) as e:
             logging.warning(f"Optimization interrupted: {e}")
+
+        # Log optimization summary
+        elapsed_time = time.time() - start_time
+        completed_trials = len(study.trials)
+        logging.info(
+            f"✅ {model_name} optimization completed: {completed_trials} trials in {elapsed_time/60:.1f} minutes"
+        )
 
         return self._finalize_optimization(
             model_name, maneuvers, best_trial_result, best_score
         )
+
+    def _should_stop_early(
+        self,
+        trial_number: int,
+        trials_since_improvement: int,
+        current_score: float,
+        best_score: float,
+    ) -> bool:
+        """Determine if optimization should stop early"""
+        if not self.early_stopping_config["enabled"]:
+            return False
+
+        # Minimum trials before early stopping
+        if trial_number < self.early_stopping_config["min_trials"]:
+            return False
+
+        # Patience-based stopping
+        if trials_since_improvement >= self.early_stopping_config["patience"]:
+            return True
+
+        # Plateau-based stopping (if score is very close to best)
+        if best_score > 0:
+            score_ratio = current_score / best_score
+            if score_ratio >= self.early_stopping_config["plateau_threshold"]:
+                return True
+
+        return False
 
     def _sample_hyperparameters(self, trial, model_name: str) -> Dict:
         """Sample hyperparameters for optimization"""
@@ -222,11 +293,10 @@ TRIAL DETAILS:
         mlflow.set_tag("mlflow.note.content", trial_description)
         mlflow.log_param("model_name", model_name)
         mlflow.log_param("trial_number", trial.number)
-        mlflow.log_param("optimization_mode", "optuna_trial")
 
-        # Log sampled hyperparameters
+        # Log all hyperparameters
         for param_name, param_value in config.items():
-            mlflow.log_param(f"hp_{param_name}", param_value)
+            mlflow.log_param(param_name, param_value)
 
     def _finalize_optimization(
         self,
@@ -328,8 +398,9 @@ USAGE RECOMMENDATIONS:
             with open(best_params_file, "w") as f:
                 yaml.dump(best_params, f, default_flow_style=False)
 
-            logging.info(f"Best parameters saved to {best_params_file}")
+            logging.info(f"Saved best parameters to {best_params_file}")
             return True
+
         except Exception as e:
             logging.error(f"Failed to save best parameters: {e}")
             return False

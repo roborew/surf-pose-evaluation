@@ -61,9 +61,35 @@ optuna:
   study_name: "surf_pose_optimization_production"
   direction: "maximize" # Maximize PCK accuracy
   n_trials: 100 # Thorough optimization
-  timeout: 18000 # 5 hours max
+  timeout_minutes: 300 # 5 hours max per model
   sampler: "TPESampler"
   pruner: "MedianPruner"
+
+  # Intelligent early stopping configuration
+  early_stopping:
+    enabled: true
+    patience: 10 # Stop if no improvement for 10 trials
+    min_trials: 15 # Minimum trials before early stopping
+    improvement_threshold: 0.001 # Minimum improvement to continue
+    plateau_threshold: 0.95 # Consider plateaued if within 95% of best
+
+  # Model-specific optimization settings
+  model_settings:
+    mediapipe:
+      expected_trials: 20 # Fast model, fewer trials needed
+      patience: 8
+    yolov8_pose:
+      expected_trials: 25
+      patience: 10
+    blazepose:
+      expected_trials: 30
+      patience: 12
+    mmpose:
+      expected_trials: 40 # Complex model, more trials
+      patience: 15
+    pytorch_pose:
+      expected_trials: 35
+      patience: 12
 
 # Performance Configuration (Production optimized)
 performance:

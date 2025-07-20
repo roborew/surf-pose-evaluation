@@ -61,7 +61,7 @@ optuna:
   study_name: "surf_pose_macos_optimization"
   direction: "maximize"
   n_trials: 20 # Reduced for macOS testing
-  timeout: 7200 # 2 hours max
+  timeout_minutes: 120 # 2 hours max
   sampler: "TPESampler"
   pruner: "MedianPruner"
 
