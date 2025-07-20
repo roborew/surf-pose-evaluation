@@ -35,7 +35,7 @@ class ConsensusEvaluator:
             reference_models=self.reference_models
         )
 
-        # Initialize pose evaluator for running models
+        # Initialize pose evaluator for accessing prediction handler
         self.pose_evaluator = PoseEvaluator(config)
 
         # Store all model predictions for consensus generation
@@ -48,24 +48,50 @@ class ConsensusEvaluator:
         target_models: List[str] = None,
         save_consensus: bool = True,
     ) -> Dict[str, Any]:
-        """Run consensus-based evaluation
+        """Run consensus-based evaluation using cached prediction files
+
+        IMPORTANT: This method only works with cached prediction files from prior model runs.
+        It will NOT re-run model inference if prediction files are missing.
 
         Args:
             maneuvers: List of maneuvers to evaluate
-            target_models: Models to evaluate against consensus (if None, evaluate all available)
+            target_models: Models to evaluate against consensus (must have cached predictions)
             save_consensus: Whether to save consensus predictions to file
 
         Returns:
-            Dictionary with evaluation results
+            Dictionary with consensus evaluation results, or empty dict if failed
         """
         logger.info(
             f"🚀 Starting consensus-based evaluation with {len(maneuvers)} maneuvers"
         )
         logger.info(f"📊 Reference models: {self.reference_models}")
 
-        # Step 1: Run all reference models to generate consensus
-        logger.info("🔄 Step 1: Running reference models to generate consensus...")
+        # Step 1: Load cached predictions from reference models
+        logger.info("🔄 Step 1: Loading cached predictions from reference models...")
         self._run_reference_models(maneuvers)
+
+        # Check if we have sufficient reference model predictions
+        if not self.all_model_predictions:
+            logger.error(
+                "❌ No reference model predictions loaded - consensus evaluation cannot proceed"
+            )
+            logger.error(
+                "   Ensure that individual model evaluation completed successfully"
+            )
+            logger.error(
+                "   and prediction files exist before running consensus evaluation"
+            )
+            return {}
+
+        if len(self.all_model_predictions) < 2:
+            logger.error(
+                f"❌ Insufficient reference models for consensus: {len(self.all_model_predictions)} < 2"
+            )
+            logger.error(f"   Available: {list(self.all_model_predictions.keys())}")
+            logger.error(
+                "   Consensus requires at least 2 reference models with cached predictions"
+            )
+            return {}
 
         # Step 2: Create consensus ground truth
         logger.info("🎯 Step 2: Creating consensus ground truth...")
@@ -85,19 +111,21 @@ class ConsensusEvaluator:
     def _run_reference_models(self, maneuvers: List):
         """Load predictions from already-computed reference models
 
+        CRITICAL: This method ONLY loads cached predictions and NEVER re-runs inference.
+        If prediction files are missing, consensus evaluation will fail.
+
         Args:
             maneuvers: List of maneuvers to process
         """
+        missing_predictions = []
+
         for model_name in self.reference_models:
             try:
-                logger.info(f"📁 Loading existing predictions for {model_name}...")
+                logger.info(
+                    f"📁 Loading cached predictions for reference model {model_name}..."
+                )
 
-                # Check if model is available
-                if model_name not in self.pose_evaluator.get_available_models():
-                    logger.warning(f"⚠️  {model_name} not available, skipping")
-                    continue
-
-                # Try to load existing prediction files first
+                # Load existing prediction files (NO model re-execution allowed)
                 predictions = self._load_existing_predictions(model_name, maneuvers)
 
                 if predictions:
@@ -106,14 +134,47 @@ class ConsensusEvaluator:
                         f"✅ {model_name} loaded {len(predictions)} cached predictions"
                     )
                 else:
-                    logger.warning(
-                        f"⚠️  No cached predictions found for {model_name}, skipping consensus for this model"
+                    missing_predictions.append(model_name)
+                    logger.error(
+                        f"❌ No cached predictions found for reference model {model_name}"
                     )
-                    continue
+                    # Show diagnostic information
+                    if (
+                        hasattr(self.pose_evaluator, "prediction_handler")
+                        and self.pose_evaluator.prediction_handler
+                    ):
+                        logger.error(
+                            f"   Prediction handler base path: {self.pose_evaluator.prediction_handler.base_path}"
+                        )
+                        for maneuver in maneuvers[:2]:  # Show first 2 for brevity
+                            expected_file = self.pose_evaluator.prediction_handler._get_prediction_file_path(
+                                maneuver.maneuver_id, model_name
+                            )
+                            logger.error(f"   Expected file: {expected_file}")
+                            logger.error(f"   File exists: {expected_file.exists()}")
 
             except Exception as e:
                 logger.error(f"❌ Failed to load predictions for {model_name}: {e}")
-                continue
+                missing_predictions.append(model_name)
+
+        # Fail fast if any reference model predictions are missing
+        if missing_predictions:
+            logger.error(f"❌ CONSENSUS EVALUATION FAILED")
+            logger.error(
+                f"   Missing prediction files for reference models: {missing_predictions}"
+            )
+            logger.error(
+                f"   Consensus evaluation requires cached predictions from ALL reference models"
+            )
+            logger.error(
+                f"   No inference will be re-run - consensus calculation aborted"
+            )
+            self.all_model_predictions.clear()  # Clear any partial data
+            return
+
+        logger.info(
+            f"✅ Successfully loaded predictions for all {len(self.all_model_predictions)} reference models"
+        )
 
     def _load_existing_predictions(
         self, model_name: str, maneuvers: List
@@ -170,35 +231,6 @@ class ConsensusEvaluator:
             logger.error(f"Error loading existing predictions for {model_name}: {e}")
             return None
 
-    def _extract_predictions_from_results(
-        self, model_results: Dict, maneuvers: List
-    ) -> List[Dict[str, Any]]:
-        """Extract pose predictions from model evaluation results
-
-        Args:
-            model_results: Results from model evaluation
-            maneuvers: List of maneuvers
-
-        Returns:
-            List of pose predictions
-        """
-        predictions = []
-
-        # Extract predictions from each maneuver
-        for maneuver in maneuvers:
-            maneuver_id = maneuver.maneuver_id
-
-            # Look for predictions in the results
-            if "maneuver_results" in model_results:
-                for result in model_results["maneuver_results"]:
-                    if result.get("maneuver_id") == maneuver_id:
-                        # Extract pose results from the maneuver
-                        pose_results = result.get("pose_results", [])
-                        predictions.extend(pose_results)
-                        break
-
-        return predictions
-
     def _create_consensus_ground_truth(self, maneuvers: List):
         """Create consensus ground truth from all reference model predictions
 
@@ -232,7 +264,7 @@ class ConsensusEvaluator:
     def _evaluate_against_consensus(
         self, maneuvers: List, target_models: List[str]
     ) -> Dict[str, Any]:
-        """Evaluate target models against consensus ground truth
+        """Evaluate target models against consensus ground truth using cached predictions
 
         Args:
             maneuvers: List of maneuvers
@@ -245,28 +277,30 @@ class ConsensusEvaluator:
 
         for model_name in target_models:
             try:
-                logger.info(f"📊 Evaluating {model_name} against consensus...")
+                logger.info(f"📊 Loading cached predictions for {model_name}...")
 
-                # Check if model is available
-                if model_name not in self.pose_evaluator.get_available_models():
-                    logger.warning(f"⚠️  {model_name} not available, skipping")
-                    continue
-
-                # Run model evaluation
-                model_results = self.pose_evaluator.evaluate_single_model_with_data(
+                # Load cached predictions instead of re-running model
+                model_predictions = self._load_existing_predictions(
                     model_name, maneuvers
                 )
 
-                # Calculate consensus-based metrics
-                consensus_metrics = self._calculate_consensus_metrics_for_model(
-                    model_name, model_results, maneuvers
+                if not model_predictions:
+                    logger.warning(
+                        f"⚠️  No cached predictions found for {model_name}, skipping consensus evaluation"
+                    )
+                    continue
+
+                # Calculate consensus-based metrics using cached predictions
+                consensus_metrics = self._calculate_consensus_metrics_from_predictions(
+                    model_name, model_predictions, maneuvers
                 )
 
-                # Combine with original results
-                model_results["consensus_metrics"] = consensus_metrics
-                results[model_name] = model_results
+                # Create results structure compatible with merge function
+                results[model_name] = {"consensus_metrics": consensus_metrics}
 
-                logger.info(f"✅ {model_name} consensus evaluation completed")
+                logger.info(
+                    f"✅ {model_name} consensus evaluation completed using cached predictions"
+                )
 
             except Exception as e:
                 logger.error(
@@ -276,79 +310,71 @@ class ConsensusEvaluator:
 
         return results
 
-    def _calculate_consensus_metrics_for_model(
-        self, model_name: str, model_results: Dict, maneuvers: List
+    def _calculate_consensus_metrics_from_predictions(
+        self, model_name: str, model_predictions: List[Dict], maneuvers: List
     ) -> Dict[str, Any]:
-        """Calculate consensus-based metrics for a specific model
+        """Calculate consensus-based metrics using cached prediction files
 
         Args:
             model_name: Name of the model
-            model_results: Results from model evaluation
+            model_predictions: List of prediction data from cached files
             maneuvers: List of maneuvers
 
         Returns:
-            Dictionary with consensus-based metrics
+            Dictionary with consensus-based metrics per maneuver
         """
         consensus_metrics = {}
 
-        for maneuver in maneuvers:
+        # For each maneuver, find corresponding prediction data and calculate metrics
+        for i, maneuver in enumerate(maneuvers):
             maneuver_id = maneuver.maneuver_id
 
             # Get consensus predictions for this maneuver
             if maneuver_id not in self.consensus_predictions:
+                logger.debug(f"No consensus predictions for maneuver {maneuver_id}")
                 continue
 
             consensus_predictions = self.consensus_predictions[maneuver_id]
 
-            # Extract model predictions for this maneuver
-            model_predictions = self._extract_maneuver_predictions(
-                model_results, maneuver_id
-            )
+            # Get model predictions for this maneuver (should be at index i)
+            if i < len(model_predictions):
+                model_prediction_data = model_predictions[i]
 
-            if not model_predictions or not consensus_predictions:
-                continue
+                # Extract frame predictions from the cached prediction file
+                frame_predictions = model_prediction_data.get("frame_predictions", [])
 
-            # Calculate relative PCK
-            relative_pck = self.consensus_metrics.calculate_relative_pck(
-                model_predictions, consensus_predictions
-            )
+                if not frame_predictions or not consensus_predictions:
+                    logger.debug(f"Empty predictions for maneuver {maneuver_id}")
+                    continue
 
-            # Calculate consensus quality
-            consensus_quality = (
-                self.consensus_metrics.calculate_consensus_quality_metrics(
-                    consensus_predictions
+                # Calculate relative PCK between model and consensus
+                relative_pck = self.consensus_metrics.calculate_relative_pck(
+                    frame_predictions, consensus_predictions
                 )
-            )
 
-            # Store metrics
-            consensus_metrics[maneuver_id] = {
-                "relative_pck": relative_pck,
-                "consensus_quality": consensus_quality,
-                "num_model_predictions": len(model_predictions),
-                "num_consensus_predictions": len(consensus_predictions),
-            }
+                # Calculate consensus quality metrics
+                consensus_quality = (
+                    self.consensus_metrics.calculate_consensus_quality_metrics(
+                        consensus_predictions
+                    )
+                )
 
+                # Store metrics
+                consensus_metrics[maneuver_id] = {
+                    "relative_pck": relative_pck,
+                    "consensus_quality": consensus_quality,
+                    "num_model_predictions": len(frame_predictions),
+                    "num_consensus_predictions": len(consensus_predictions),
+                }
+
+                logger.debug(
+                    f"Calculated consensus metrics for {maneuver_id}: {len(frame_predictions)} model predictions vs {len(consensus_predictions)} consensus predictions"
+                )
+
+        logger.info(
+            f"Consensus metrics calculated for {len(consensus_metrics)} maneuvers for {model_name}"
+        )
         return consensus_metrics
-
-    def _extract_maneuver_predictions(
-        self, model_results: Dict, maneuver_id: str
-    ) -> List[Dict[str, Any]]:
-        """Extract predictions for a specific maneuver
-
-        Args:
-            model_results: Results from model evaluation
-            maneuver_id: ID of the maneuver
-
-        Returns:
-            List of predictions for the maneuver
-        """
-        # Look for predictions in the results
-        if "maneuver_results" in model_results:
-            for result in model_results["maneuver_results"]:
-                if result.get("maneuver_id") == maneuver_id:
-                    return result.get("pose_results", [])
-
-        return []
 
     def _save_consensus_predictions(self):
         """Save consensus predictions to file"""

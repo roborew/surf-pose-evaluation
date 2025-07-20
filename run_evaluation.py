@@ -1065,12 +1065,21 @@ def main():
                     comparison_result["results"] = merged_results
                     logger.info("✅ Merged consensus metrics with comparison results")
                 elif not consensus_result:
-                    logger.warning(
-                        "⚠️ Consensus evaluation returned None - no consensus metrics will be available"
+                    logger.error(
+                        "❌ Consensus evaluation failed - no consensus metrics will be available"
                     )
-                    logger.warning(f"   Available models: {args.models}")
-                    logger.warning(
+                    logger.error(
+                        "   This means prediction files from individual model evaluation were not found"
+                    )
+                    logger.error(f"   Available models: {args.models}")
+                    logger.error(
+                        f"   Prediction directory: {run_manager.predictions_dir}"
+                    )
+                    logger.error(
                         f"   Prediction files exist: {list(run_manager.predictions_dir.iterdir()) if run_manager.predictions_dir.exists() else 'None'}"
+                    )
+                    logger.error(
+                        "   Consensus evaluation requires cached prediction files - no inference will be re-run"
                     )
                 else:
                     logger.warning(
