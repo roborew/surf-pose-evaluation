@@ -143,16 +143,24 @@ class ConsensusEvaluator:
                         hasattr(self.pose_evaluator, "prediction_handler")
                         and self.pose_evaluator.prediction_handler
                     ):
-                        logger.error(
-                            f"   Prediction handler base path: {self.pose_evaluator.prediction_handler.base_path}"
+                        model_dir = (
+                            Path(self.pose_evaluator.prediction_handler.base_path)
+                            / model_name
                         )
-                        for maneuver in maneuvers[:2]:  # Show first 2 for brevity
-                            expected_file_path = self.pose_evaluator.prediction_handler.get_prediction_file_path(
-                                model_name, maneuver.maneuver_id
+                        logger.error(f"   Model directory: {model_dir}")
+                        logger.error(f"   Directory exists: {model_dir.exists()}")
+                        if model_dir.exists():
+                            prediction_files = list(
+                                model_dir.glob("*_predictions.json")
                             )
-                            expected_file = Path(expected_file_path)
-                            logger.error(f"   Expected file: {expected_file}")
-                            logger.error(f"   File exists: {expected_file.exists()}")
+                            logger.error(
+                                f"   Found {len(prediction_files)} prediction files"
+                            )
+                            if prediction_files:
+                                logger.error(
+                                    f"   Sample files: {[f.name for f in prediction_files[:3]]}"
+                                )
+                        logger.error(f"   Required maneuvers: {len(maneuvers)}")
 
             except Exception as e:
                 logger.error(f"❌ Failed to load predictions for {model_name}: {e}")
@@ -180,7 +188,11 @@ class ConsensusEvaluator:
     def _load_existing_predictions(
         self, model_name: str, maneuvers: List
     ) -> Optional[List]:
-        """Load existing prediction files for a model
+        """Load existing prediction files for a model by discovering files in the model directory
+
+        This method is file-format agnostic - it discovers prediction files by listing
+        the model directory and matching them to maneuvers, rather than constructing
+        file paths. This makes it robust to future changes in naming conventions.
 
         Args:
             model_name: Name of the model
@@ -200,33 +212,76 @@ class ConsensusEvaluator:
                 )
                 return None
 
+            # Get the model's prediction directory
+            model_dir = (
+                Path(self.pose_evaluator.prediction_handler.base_path) / model_name
+            )
+
+            if not model_dir.exists():
+                logger.warning(f"Model prediction directory not found: {model_dir}")
+                return None
+
+            # Discover all prediction files in the model directory
+            prediction_files = list(model_dir.glob("*_predictions.json"))
+
+            if not prediction_files:
+                logger.warning(f"No prediction files found in {model_dir}")
+                return None
+
+            logger.info(
+                f"📂 Found {len(prediction_files)} prediction files for {model_name}"
+            )
+
+            # Load all prediction files (format-agnostic approach)
             predictions = []
+            loaded_maneuver_ids = set()
 
-            # Load prediction files for each maneuver
-            for maneuver in maneuvers:
+            for prediction_file in prediction_files:
                 try:
-                    # Try to load the prediction file for this maneuver
-                    prediction_file_path = self.pose_evaluator.prediction_handler.get_prediction_file_path(
-                        model_name, maneuver.maneuver_id
-                    )
-                    prediction_file = Path(prediction_file_path)
+                    with open(prediction_file, "r") as f:
+                        prediction_data = json.load(f)
 
-                    if prediction_file.exists():
-                        import json
+                    # Check if this prediction matches one of our target maneuvers
+                    prediction_maneuver_id = prediction_data.get("maneuver_id")
 
-                        with open(prediction_file, "r") as f:
-                            prediction_data = json.load(f)
+                    # Find matching maneuver in our list
+                    matching_maneuver = None
+                    for maneuver in maneuvers:
+                        if maneuver.maneuver_id == prediction_maneuver_id:
+                            matching_maneuver = maneuver
+                            break
+
+                    if matching_maneuver:
                         predictions.append(prediction_data)
+                        loaded_maneuver_ids.add(prediction_maneuver_id)
+                        logger.debug(
+                            f"✓ Loaded prediction for {prediction_maneuver_id}"
+                        )
                     else:
-                        logger.warning(f"Prediction file not found: {prediction_file}")
-                        return None  # If any prediction is missing, can't do consensus
+                        logger.debug(
+                            f"⏭️ Skipping prediction for {prediction_maneuver_id} (not in target maneuvers)"
+                        )
 
                 except Exception as e:
                     logger.warning(
-                        f"Failed to load prediction for maneuver {maneuver.maneuver_id}: {e}"
+                        f"Failed to load prediction file {prediction_file}: {e}"
                     )
-                    return None
+                    continue
 
+            # Check if we found predictions for all required maneuvers
+            target_maneuver_ids = {maneuver.maneuver_id for maneuver in maneuvers}
+            missing_maneuvers = target_maneuver_ids - loaded_maneuver_ids
+
+            if missing_maneuvers:
+                logger.warning(
+                    f"Missing predictions for maneuvers: {sorted(missing_maneuvers)}"
+                )
+                logger.warning(f"Found predictions for: {sorted(loaded_maneuver_ids)}")
+                return None  # If any prediction is missing, can't do consensus
+
+            logger.info(
+                f"✅ Successfully loaded predictions for all {len(predictions)} maneuvers"
+            )
             return predictions if predictions else None
 
         except Exception as e:
