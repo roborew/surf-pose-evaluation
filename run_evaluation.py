@@ -342,6 +342,15 @@ def run_consensus_phase(
         reference_models = ["pytorch_pose", "yolov8_pose", "mmpose"]
         available_reference_models = [m for m in reference_models if m in args.models]
 
+        logger.info(f"🔍 Consensus evaluation check:")
+        logger.info(f"   Reference models required: {reference_models}")
+        logger.info(f"   Models in args: {args.models}")
+        logger.info(f"   Available reference models: {available_reference_models}")
+        logger.info(f"   Prediction directory: {run_manager.predictions_dir}")
+        logger.info(
+            f"   Prediction directory exists: {run_manager.predictions_dir.exists()}"
+        )
+
         if len(available_reference_models) < 2:
             logger.warning(
                 f"⚠️ Need at least 2 reference models for consensus, have {len(available_reference_models)}"
@@ -374,11 +383,21 @@ def run_consensus_phase(
             )
 
         # Run consensus evaluation
+        logger.info(
+            f"🚀 Starting consensus evaluation with {len(comparison_maneuvers)} maneuvers"
+        )
         consensus_results = consensus_evaluator.run_consensus_evaluation(
             comparison_maneuvers, target_models=args.models, save_consensus=True
         )
 
-        logger.info("✅ Consensus evaluation completed successfully")
+        if consensus_results:
+            logger.info("✅ Consensus evaluation completed successfully")
+            logger.info(
+                f"   Consensus results for models: {list(consensus_results.keys())}"
+            )
+        else:
+            logger.warning("⚠️ Consensus evaluation returned empty results")
+
         return consensus_results
 
     except ImportError:
@@ -388,6 +407,9 @@ def run_consensus_phase(
         return None
     except Exception as e:
         logger.error(f"❌ Consensus evaluation failed: {e}")
+        import traceback
+
+        logger.error(f"   Traceback: {traceback.format_exc()}")
         return None
 
 
@@ -1042,6 +1064,18 @@ def main():
                     )
                     comparison_result["results"] = merged_results
                     logger.info("✅ Merged consensus metrics with comparison results")
+                elif not consensus_result:
+                    logger.warning(
+                        "⚠️ Consensus evaluation returned None - no consensus metrics will be available"
+                    )
+                    logger.warning(f"   Available models: {args.models}")
+                    logger.warning(
+                        f"   Prediction files exist: {list(run_manager.predictions_dir.iterdir()) if run_manager.predictions_dir.exists() else 'None'}"
+                    )
+                else:
+                    logger.warning(
+                        "⚠️ Comparison result missing - cannot merge consensus metrics"
+                    )
 
                 results["comparison_phase"] = "completed"
                 results["configs_used"].append(comparison_result["config_path"])
