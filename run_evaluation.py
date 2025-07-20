@@ -460,7 +460,7 @@ def merge_consensus_with_comparison(
                             relative_pck["consensus_coverage_ratio"]
                         )
 
-                    # Also check consensus_quality for backward compatibility
+                    # Also check consensus_quality for backward compatibility and new format
                     if "consensus_coverage" in consensus_quality:
                         all_consensus_coverage.append(
                             consensus_quality["consensus_coverage"]
@@ -468,6 +468,16 @@ def merge_consensus_with_comparison(
                     if "avg_consensus_confidence" in consensus_quality:
                         all_consensus_confidence.append(
                             consensus_quality["avg_consensus_confidence"]
+                        )
+
+                    # Also check relative_pck for newer format
+                    if "consensus_coverage" in relative_pck:
+                        all_consensus_coverage.append(
+                            relative_pck["consensus_coverage"]
+                        )
+                    if "consensus_confidence" in relative_pck:
+                        all_consensus_confidence.append(
+                            relative_pck["consensus_confidence"]
                         )
 
                 # Add aggregated consensus-based metrics
@@ -751,6 +761,7 @@ def generate_summary_report(
             consensus_pck_error = result["accuracy"]["consensus_pck_error"]
             consensus_pck_02 = result["accuracy"]["consensus_pck_0.2"]
             consensus_coverage = result["accuracy"]["consensus_coverage"]
+            consensus_confidence = result["accuracy"]["consensus_confidence"]
 
             print("   🎯 Consensus-based Accuracy (Synthetic GT from 3 models):")
             print(
@@ -767,6 +778,11 @@ def generate_summary_report(
                 f"     • Consensus Coverage: {consensus_coverage:.3f}"
                 if consensus_coverage is not None
                 else "     • Consensus Coverage: N/A"
+            )
+            print(
+                f"     • Consensus Confidence: {consensus_confidence:.3f}"
+                if consensus_confidence is not None
+                else "     • Consensus Confidence: N/A"
             )
 
             # Display COCO ground truth accuracy (reference metrics)
@@ -1069,10 +1085,16 @@ def main():
                         # Find and restart the MLflow run for this model to add consensus metrics
                         mlflow.set_tracking_uri(str(run_manager.mlflow_dir))
 
-                        # Get the experiment
-                        experiment = mlflow.get_experiment_by_name(
-                            "surf_pose_production_comparison"
-                        )
+                        # Get the experiment - use pattern matching since name is timestamped
+                        # Look for experiment like: surf_pose_production_comparison_20250720_193441
+                        experiments = mlflow.search_experiments()
+                        experiment = None
+                        for exp in experiments:
+                            if exp.name and exp.name.startswith(
+                                "surf_pose_production_comparison"
+                            ):
+                                experiment = exp
+                                break
                         if experiment:
                             # Find the run for this model
                             runs = mlflow.search_runs(

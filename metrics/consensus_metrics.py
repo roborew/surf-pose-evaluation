@@ -323,8 +323,21 @@ class ConsensusMetrics:
         flat_weights = []
 
         for scores, weight in zip(all_scores, model_weights):
-            flat_scores.extend(scores)
-            flat_weights.extend([weight] * len(scores))
+            # Handle potential None values in scores
+            if scores is None:
+                continue
+            if isinstance(scores, (list, tuple)):
+                # Filter out any None values from the scores
+                valid_scores = [
+                    s
+                    for s in scores
+                    if s is not None and not (isinstance(s, float) and (s != s))
+                ]  # Filter NaN
+                flat_scores.extend(valid_scores)
+                flat_weights.extend([weight] * len(valid_scores))
+            elif isinstance(scores, (int, float)) and scores == scores:  # Check for NaN
+                flat_scores.append(scores)
+                flat_weights.append(weight)
 
         if not flat_scores:
             return 0.0
