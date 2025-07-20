@@ -404,9 +404,26 @@ class ConsensusEvaluator:
                     logger.debug(f"Empty predictions for maneuver {maneuver_id}")
                     continue
 
+                # Transform frame predictions to the format expected by consensus metrics
+                # Convert from frames[i].persons structure to predictions[i].keypoints structure
+                transformed_predictions = []
+                for frame in frame_predictions:
+                    frame_dict = {
+                        "keypoints": [
+                            person.get("keypoints", [])
+                            for person in frame.get("persons", [])
+                        ],
+                        "scores": [
+                            person.get("scores", [])
+                            for person in frame.get("persons", [])
+                        ],
+                        "num_persons": len(frame.get("persons", [])),
+                    }
+                    transformed_predictions.append(frame_dict)
+
                 # Calculate relative PCK between model and consensus
                 relative_pck = self.consensus_metrics.calculate_relative_pck(
-                    frame_predictions, consensus_predictions
+                    transformed_predictions, consensus_predictions
                 )
 
                 # Calculate consensus quality metrics
