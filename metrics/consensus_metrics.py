@@ -367,30 +367,34 @@ class ConsensusMetrics:
         # Create frame index mappings for alignment
         model_frame_map = {}
         consensus_frame_map = {}
-        
+
         # Map model predictions by frame index
         for i, pred in enumerate(model_predictions):
             frame_idx = pred.get("frame_idx", pred.get("frame_id", i))
             model_frame_map[frame_idx] = pred
-            
-        # Map consensus predictions by frame index  
+
+        # Map consensus predictions by frame index
         for i, consensus in enumerate(consensus_predictions):
             frame_idx = consensus.get("frame_idx", consensus.get("frame_id", i))
             consensus_frame_map[frame_idx] = consensus
 
         # Find common frame indices
         common_frames = set(model_frame_map.keys()) & set(consensus_frame_map.keys())
-        logger.info(f"Found {len(common_frames)} common frames out of {len(model_frame_map)} model frames and {len(consensus_frame_map)} consensus frames")
+        logger.info(
+            f"Found {len(common_frames)} common frames out of {len(model_frame_map)} model frames and {len(consensus_frame_map)} consensus frames"
+        )
 
         if not common_frames:
-            logger.warning("No common frames found between model and consensus predictions")
+            logger.warning(
+                "No common frames found between model and consensus predictions"
+            )
             return {"relative_pck_error": 1.0}
 
         # Process only common frames
         for frame_idx in sorted(common_frames):
             pred = model_frame_map[frame_idx]
             consensus = consensus_frame_map[frame_idx]
-            
+
             if "keypoints" not in pred or "keypoints" not in consensus:
                 continue
 
@@ -457,14 +461,18 @@ class ConsensusMetrics:
         model_frame_count = len(model_frame_map)
         consensus_frame_count = len(consensus_frame_map)
         common_frame_count = len(common_frames)
-        coverage_ratio = common_frame_count / max(model_frame_count, consensus_frame_count) if max(model_frame_count, consensus_frame_count) > 0 else 0.0
+        coverage_ratio = (
+            common_frame_count / max(model_frame_count, consensus_frame_count)
+            if max(model_frame_count, consensus_frame_count) > 0
+            else 0.0
+        )
 
         return {
-            f"relative_pck_{threshold}": relative_pck,
-            "relative_pck_error": 1.0 - relative_pck,
-            "relative_mean_normalized_distance": mean_distance,
-            "relative_total_correct_keypoints": total_correct,
-            "relative_total_valid_keypoints": total_valid,
+            f"consensus_pck_{threshold}": relative_pck,
+            "consensus_pck_error": 1.0 - relative_pck,
+            "consensus_mean_normalized_distance": mean_distance,
+            "consensus_total_correct_keypoints": total_correct,
+            "consensus_total_valid_keypoints": total_valid,
             "consensus_coverage_ratio": coverage_ratio,
             "consensus_common_frames": common_frame_count,
             "model_total_frames": model_frame_count,

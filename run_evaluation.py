@@ -439,6 +439,14 @@ def merge_consensus_with_comparison(
                     consensus_quality = maneuver_metrics.get("consensus_quality", {})
 
                     # Extract metrics from the relative_pck dict directly
+                    if "consensus_pck_error" in relative_pck:
+                        all_relative_pck.append(
+                            1.0 - relative_pck["consensus_pck_error"]
+                        )
+                    if "consensus_pck_0.2" in relative_pck:
+                        all_relative_pck_02.append(relative_pck["consensus_pck_0.2"])
+
+                    # Backward compatibility with old naming
                     if "relative_pck_error" in relative_pck:
                         all_relative_pck.append(
                             1.0 - relative_pck["relative_pck_error"]
@@ -462,13 +470,13 @@ def merge_consensus_with_comparison(
                             consensus_quality["avg_consensus_confidence"]
                         )
 
-                # Add aggregated metrics to model results
+                # Add aggregated consensus-based metrics
                 if all_relative_pck:
-                    merged_results[model_name]["pose_relative_pck_error_mean"] = (
+                    merged_results[model_name]["pose_consensus_pck_error_mean"] = (
                         1.0 - np.mean(all_relative_pck)
                     )
                 if all_relative_pck_02:
-                    merged_results[model_name]["pose_relative_pck_0.2_mean"] = np.mean(
+                    merged_results[model_name]["pose_consensus_pck_0.2_mean"] = np.mean(
                         all_relative_pck_02
                     )
                 if all_consensus_coverage:
@@ -564,12 +572,12 @@ def generate_summary_report(
                     # Legacy PCK (usually null without ground truth)
                     "pck_error_mean": run.get("metrics.pose_pck_error_mean", None),
                     "detection_f1": run.get("metrics.pose_detection_f1_mean", None),
-                    # Consensus-based metrics (pseudo ground truth) - PRIMARY METRICS
-                    "relative_pck_error": run.get(
-                        "metrics.pose_relative_pck_error_mean", None
+                    # Consensus-based metrics (synthetic ground truth from 3 reference models) - PRIMARY METRICS
+                    "consensus_pck_error": run.get(
+                        "metrics.pose_consensus_pck_error_mean", None
                     ),
-                    "relative_pck_0.2": run.get(
-                        "metrics.pose_relative_pck_0.2_mean", None
+                    "consensus_pck_0.2": run.get(
+                        "metrics.pose_consensus_pck_0.2_mean", None
                     ),
                     "consensus_coverage": run.get(
                         "metrics.pose_consensus_coverage_mean", None
@@ -740,20 +748,20 @@ def generate_summary_report(
             coco_images = result["performance"]["coco_images_processed"]
 
             # Display consensus-based accuracy metrics FIRST (primary metrics)
-            relative_pck_error = result["accuracy"]["relative_pck_error"]
-            relative_pck_02 = result["accuracy"]["relative_pck_0.2"]
+            consensus_pck_error = result["accuracy"]["consensus_pck_error"]
+            consensus_pck_02 = result["accuracy"]["consensus_pck_0.2"]
             consensus_coverage = result["accuracy"]["consensus_coverage"]
 
-            print("   🎯 Consensus-based Accuracy (Primary):")
+            print("   🎯 Consensus-based Accuracy (Synthetic GT from 3 models):")
             print(
-                f"     • Relative PCK Error: {relative_pck_error:.4f}"
-                if relative_pck_error is not None
-                else "     • Relative PCK Error: N/A"
+                f"     • Consensus PCK Error: {consensus_pck_error:.4f}"
+                if consensus_pck_error is not None
+                else "     • Consensus PCK Error: N/A"
             )
             print(
-                f"     • Relative PCK@0.2: {relative_pck_02:.4f}"
-                if relative_pck_02 is not None
-                else "     • Relative PCK@0.2: N/A"
+                f"     • Consensus PCK@0.2: {consensus_pck_02:.4f}"
+                if consensus_pck_02 is not None
+                else "     • Consensus PCK@0.2: N/A"
             )
             print(
                 f"     • Consensus Coverage: {consensus_coverage:.3f}"
@@ -878,27 +886,6 @@ def generate_summary_report(
                 f"   • P95 Inference: {p95_inference:.1f}ms"
                 if p95_inference is not None
                 else "   • P95 Inference: N/A"
-            )
-
-            # Display consensus-based accuracy metrics
-            relative_pck_error = result["accuracy"]["relative_pck_error"]
-            relative_pck_02 = result["accuracy"]["relative_pck_0.2"]
-            consensus_coverage = result["accuracy"]["consensus_coverage"]
-
-            print(
-                f"   • Relative PCK Error: {relative_pck_error:.4f}"
-                if relative_pck_error is not None
-                else "   • Relative PCK Error: N/A"
-            )
-            print(
-                f"   • Relative PCK@0.2: {relative_pck_02:.4f}"
-                if relative_pck_02 is not None
-                else "   • Relative PCK@0.2: N/A"
-            )
-            print(
-                f"   • Consensus Coverage: {consensus_coverage:.3f}"
-                if consensus_coverage is not None
-                else "   • Consensus Coverage: N/A"
             )
 
         # Display best performers summary
