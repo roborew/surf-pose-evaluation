@@ -434,15 +434,25 @@ def merge_consensus_with_comparison(
                 all_consensus_confidence = []
 
                 for maneuver_id, maneuver_metrics in consensus_metrics.items():
+                    # Fix: Consensus metrics are now stored directly in relative_pck dict
                     relative_pck = maneuver_metrics.get("relative_pck", {})
                     consensus_quality = maneuver_metrics.get("consensus_quality", {})
 
+                    # Extract metrics from the relative_pck dict directly
                     if "relative_pck_error" in relative_pck:
                         all_relative_pck.append(
                             1.0 - relative_pck["relative_pck_error"]
                         )
                     if "relative_pck_0.2" in relative_pck:
                         all_relative_pck_02.append(relative_pck["relative_pck_0.2"])
+
+                    # Fix: Use the correct key names from our updated metrics
+                    if "consensus_coverage_ratio" in relative_pck:
+                        all_consensus_coverage.append(
+                            relative_pck["consensus_coverage_ratio"]
+                        )
+
+                    # Also check consensus_quality for backward compatibility
                     if "consensus_coverage" in consensus_quality:
                         all_consensus_coverage.append(
                             consensus_quality["consensus_coverage"]
