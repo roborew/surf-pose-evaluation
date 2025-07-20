@@ -99,10 +99,13 @@ class RunManager:
 
     def _create_run_metadata(self):
         """Create metadata file for this run"""
+        import sys
+
         metadata = {
             "run_name": self.run_name,
             "timestamp": self.timestamp,
             "created_at": datetime.now().isoformat(),
+            "command_line": " ".join(sys.argv),  # Record exact command used
             "machine_info": {
                 "hostname": os.uname().nodename,
                 "platform": os.uname().sysname,

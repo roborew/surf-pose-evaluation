@@ -357,6 +357,22 @@ def run_consensus_phase(
             config, reference_models=available_reference_models
         )
 
+        # CRITICAL: Set run_manager on consensus evaluator's pose_evaluator
+        # to ensure it uses the correct prediction file paths
+        consensus_evaluator.pose_evaluator.run_manager = run_manager
+
+        # Also update the prediction handler to use the correct run-specific path
+        prediction_config = config.get("output", {}).get("predictions", {})
+        if prediction_config.get("enabled", True):
+            from utils.prediction_file_format import PredictionFileHandler
+
+            consensus_evaluator.pose_evaluator.prediction_handler = (
+                PredictionFileHandler(str(run_manager.predictions_dir))
+            )
+            logger.info(
+                f"🔗 Updated consensus evaluator to use prediction path: {run_manager.predictions_dir}"
+            )
+
         # Run consensus evaluation
         consensus_results = consensus_evaluator.run_consensus_evaluation(
             comparison_maneuvers, target_models=args.models, save_consensus=True
