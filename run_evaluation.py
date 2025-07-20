@@ -1061,6 +1061,52 @@ def main():
                     )
                     comparison_result["results"] = merged_results
                     logger.info("✅ Merged consensus metrics with comparison results")
+
+                    # CRITICAL FIX: Log consensus metrics to MLflow AFTER merging
+                    import mlflow
+
+                    for model_name, model_result in merged_results.items():
+                        # Find and restart the MLflow run for this model to add consensus metrics
+                        mlflow.set_tracking_uri(str(run_manager.mlflow_dir))
+
+                        # Get the experiment
+                        experiment = mlflow.get_experiment_by_name(
+                            "surf_pose_production_comparison"
+                        )
+                        if experiment:
+                            # Find the run for this model
+                            runs = mlflow.search_runs(
+                                experiment_ids=[experiment.experiment_id],
+                                filter_string=f"params.model_name = '{model_name}'",
+                            )
+
+                            if not runs.empty:
+                                run_id = runs.iloc[0]["run_id"]
+
+                                # Log consensus metrics to the existing run
+                                with mlflow.start_run(run_id=run_id):
+                                    for metric_name, value in model_result.items():
+                                        if metric_name.startswith(
+                                            "pose_consensus_"
+                                        ) and isinstance(value, (int, float)):
+                                            if hasattr(value, "item"):
+                                                value = value.item()
+                                            mlflow.log_metric(metric_name, value)
+                                            logger.debug(
+                                                f"Logged consensus metric {metric_name}: {value} for {model_name}"
+                                            )
+
+                                logger.info(
+                                    f"✅ Logged consensus metrics to MLflow for {model_name}"
+                                )
+                            else:
+                                logger.warning(
+                                    f"⚠️ Could not find MLflow run for {model_name} to log consensus metrics"
+                                )
+                        else:
+                            logger.warning(
+                                "⚠️ Could not find comparison experiment to log consensus metrics"
+                            )
                 elif not consensus_result:
                     logger.error(
                         "❌ Consensus evaluation failed - no consensus metrics will be available"
