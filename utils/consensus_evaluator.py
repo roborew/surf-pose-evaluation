@@ -398,7 +398,7 @@ class ConsensusEvaluator:
                 model_prediction_data = model_predictions[i]
 
                 # Extract frame predictions from the cached prediction file
-                frame_predictions = model_prediction_data.get("frame_predictions", [])
+                frame_predictions = model_prediction_data.get("frames", [])
 
                 if not frame_predictions or not consensus_predictions:
                     logger.debug(f"Empty predictions for maneuver {maneuver_id}")
