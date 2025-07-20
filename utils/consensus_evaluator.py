@@ -147,9 +147,10 @@ class ConsensusEvaluator:
                             f"   Prediction handler base path: {self.pose_evaluator.prediction_handler.base_path}"
                         )
                         for maneuver in maneuvers[:2]:  # Show first 2 for brevity
-                            expected_file = self.pose_evaluator.prediction_handler._get_prediction_file_path(
-                                maneuver.maneuver_id, model_name
+                            expected_file_path = self.pose_evaluator.prediction_handler.get_prediction_file_path(
+                                model_name, maneuver.maneuver_id
                             )
+                            expected_file = Path(expected_file_path)
                             logger.error(f"   Expected file: {expected_file}")
                             logger.error(f"   File exists: {expected_file.exists()}")
 
@@ -205,9 +206,10 @@ class ConsensusEvaluator:
             for maneuver in maneuvers:
                 try:
                     # Try to load the prediction file for this maneuver
-                    prediction_file = self.pose_evaluator.prediction_handler._get_prediction_file_path(
-                        maneuver.maneuver_id, model_name
+                    prediction_file_path = self.pose_evaluator.prediction_handler.get_prediction_file_path(
+                        model_name, maneuver.maneuver_id
                     )
+                    prediction_file = Path(prediction_file_path)
 
                     if prediction_file.exists():
                         import json
