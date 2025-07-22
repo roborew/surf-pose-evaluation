@@ -8,16 +8,17 @@ A comprehensive evaluation framework for pose estimation models on surf footage,
 2. [Quick Start](#quick-start)
 3. [Installation & Setup](#installation--setup)
 4. [Running Evaluations](#running-evaluations)
-5. [Understanding Results](#understanding-results)
-6. [System Architecture](#system-architecture)
-7. [Configuration](#configuration)
-8. [Enhanced Optuna Optimization](#enhanced-optuna-optimization)
-9. [GPU Acceleration](#gpu-acceleration)
-10. [Multi-Machine Setup](#multi-machine-setup)
-11. [Testing & Verification](#testing--verification)
-12. [Troubleshooting](#troubleshooting)
-13. [Advanced Setup Details](#advanced-setup-details)
-14. [YOLOv8 Weight Management](#yolov8-weight-management)
+5. [Parameter Migration Guide](#parameter-migration-guide)
+6. [Understanding Results](#understanding-results)
+7. [System Architecture](#system-architecture)
+8. [Configuration](#configuration)
+9. [Enhanced Optuna Optimization](#enhanced-optuna-optimization)
+10. [GPU Acceleration](#gpu-acceleration)
+11. [Multi-Machine Setup](#multi-machine-setup)
+12. [Testing & Verification](#testing--verification)
+13. [Troubleshooting](#troubleshooting)
+14. [Advanced Setup Details](#advanced-setup-details)
+15. [YOLOv8 Weight Management](#yolov8-weight-management)
 
 ## Overview
 
@@ -204,6 +205,43 @@ python run_evaluation.py --comparison-only --max-clips 50
 python run_evaluation.py --skip-optuna
 ```
 
+### Parameter Control Options
+
+#### New Parameters (Recommended)
+
+For better control over each evaluation phase, use the specific parameters:
+
+```bash
+# Separate control over Optuna and Comparison phases
+python run_evaluation.py \
+    --optuna-max-clips 6 \
+    --comparison-max-clips 20 \
+    --run-name "precise_control_test"
+
+# Fast optimization, reasonable comparison
+python run_evaluation.py \
+    --optuna-max-clips 6 \
+    --run-name "prod_test"
+    # Comparison uses config value (50 clips from quick_test)
+```
+
+#### Legacy Parameter (Backward Compatible)
+
+The `--max-clips` parameter still works but shows deprecation warnings:
+
+```bash
+# Old way (still supported)
+python run_evaluation.py --max-clips 6 --run-name 'legacy_test'
+# Both Optuna and Comparison use 6 clips
+```
+
+#### Parameter Priority
+
+1. **Optuna Phase**: `--optuna-max-clips` → `--max-clips` → full dataset
+2. **Comparison Phase**: `--comparison-max-clips` → `--max-clips` → config value (50 clips from quick_test)
+
+For complete parameter migration details, see the [Parameter Migration Guide](#parameter-migration-guide) section below.
+
 ### Direct Model Evaluation
 
 ```bash
@@ -231,6 +269,101 @@ visualizer.create_visualization_from_prediction_file(
 )
 "
 ```
+
+## Parameter Migration Guide
+
+### 🔄 Parameter Changes
+
+The `--max-clips` parameter behavior has been enhanced with clearer, more specific parameters while maintaining backward compatibility.
+
+### 📊 Parameter Options
+
+#### **New Parameters (Recommended)**
+
+| Parameter                | Description                                 | Example                     |
+| ------------------------ | ------------------------------------------- | --------------------------- |
+| `--optuna-max-clips`     | Maximum clips for Optuna optimization phase | `--optuna-max-clips 6`      |
+| `--comparison-max-clips` | Maximum clips for comparison phase          | `--comparison-max-clips 10` |
+
+#### **Legacy Parameter (Deprecated but Still Supported)**
+
+| Parameter     | Description                                    | Behavior                                   |
+| ------------- | ---------------------------------------------- | ------------------------------------------ |
+| `--max-clips` | **[DEPRECATED]** Maximum clips for both phases | Controls both Optuna and Comparison phases |
+
+### 🚀 Usage Examples
+
+#### **1. Old Way (Backward Compatible)**
+
+```bash
+python run_evaluation.py --max-clips 6 --run-name 'old_style_test'
+```
+
+- **Optuna**: Uses 6 clips
+- **Comparison**: Uses 6 clips
+- **Warning**: Shows deprecation warning
+
+#### **2. New Way (Recommended)**
+
+```bash
+python run_evaluation.py --optuna-max-clips 6 --comparison-max-clips 10 --run-name 'new_style_test'
+```
+
+- **Optuna**: Uses 6 clips
+- **Comparison**: Uses 10 clips
+- **Benefit**: Full control over each phase
+
+#### **3. Mixed Approach**
+
+```bash
+python run_evaluation.py --optuna-max-clips 6 --run-name 'mixed_test'
+```
+
+- **Optuna**: Uses 6 clips
+- **Comparison**: Uses config value (50 clips from quick_test)
+- **Use Case**: Fast optimization, reasonable comparison
+
+#### **4. Production Default**
+
+```bash
+python run_evaluation.py --run-name 'production_run'
+```
+
+- **Optuna**: Uses full dataset
+- **Comparison**: Uses config value (50 clips from quick_test)
+- **Use Case**: Standard evaluation with reasonable performance
+
+### 🎯 Migration Strategy
+
+#### **Phase 1: Current (Backward Compatible)**
+
+- `--max-clips` still works but shows deprecation warnings
+- New parameters are available and recommended
+
+#### **Phase 2: Future (Optional)**
+
+- `--max-clips` could be removed in future versions
+- All users should migrate to specific parameters
+
+### 🔍 Parameter Priority
+
+When multiple parameters are provided:
+
+1. **Optuna Phase**: `--optuna-max-clips` > `--max-clips` > full dataset
+2. **Comparison Phase**: `--comparison-max-clips` > `--max-clips` > config value
+
+### 💡 Benefits of New Parameters
+
+- **Clarity**: Explicit control over each phase
+- **Flexibility**: Different datasets for optimization vs comparison
+- **Performance**: Defaults to reasonable dataset sizes (50 clips for comparison)
+- **Testing**: Easy to test with limited datasets
+- **Production**: Full control over resource usage
+- **Comprehensive Mode**: Use `--comparison-max-clips 200` for full comprehensive evaluation
+
+### ⚠️ Breaking Changes
+
+**None!** The implementation maintains full backward compatibility while providing clearer parameter names for future use.
 
 ## Understanding Results
 

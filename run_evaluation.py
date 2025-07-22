@@ -47,7 +47,19 @@ def parse_arguments():
         help="Models to evaluate",
     )
     parser.add_argument(
-        "--max-clips", type=int, help="Maximum number of clips to process"
+        "--max-clips",
+        type=int,
+        help="[DEPRECATED] Maximum clips for both phases. Use --optuna-max-clips and --comparison-max-clips instead",
+    )
+    parser.add_argument(
+        "--optuna-max-clips",
+        type=int,
+        help="Maximum number of clips for Optuna optimization phase",
+    )
+    parser.add_argument(
+        "--comparison-max-clips",
+        type=int,
+        help="Maximum number of clips for comparison phase. If not specified, uses config value",
     )
     parser.add_argument(
         "--config",
@@ -434,8 +446,10 @@ def run_consensus_phase(
             )
 
         # Run consensus evaluation using maneuvers that actually have prediction files
-        logger.info("🔍 Determining consensus dataset from available prediction files...")
-        
+        logger.info(
+            "🔍 Determining consensus dataset from available prediction files..."
+        )
+
         # Get maneuvers that actually have prediction files (from comparison phase execution)
         prediction_dir = run_manager.predictions_dir
         if prediction_dir.exists() and list(prediction_dir.iterdir()):
@@ -444,27 +458,32 @@ def run_consensus_phase(
             if model_dirs:
                 sample_model_dir = model_dirs[0]
                 prediction_files = list(sample_model_dir.glob("*_predictions.json"))
-                
+
                 # Extract maneuver IDs from prediction files
                 actual_maneuver_ids = set()
                 for pred_file in prediction_files:
                     try:
-                        with open(pred_file, 'r') as f:
+                        with open(pred_file, "r") as f:
                             pred_data = json.load(f)
-                            maneuver_id = pred_data.get('maneuver_id')
+                            maneuver_id = pred_data.get("maneuver_id")
                             if maneuver_id:
                                 actual_maneuver_ids.add(maneuver_id)
                     except Exception as e:
-                        logger.warning(f"Failed to read prediction file {pred_file}: {e}")
-                
+                        logger.warning(
+                            f"Failed to read prediction file {pred_file}: {e}"
+                        )
+
                 # Filter comparison_maneuvers to only include those with predictions
                 consensus_maneuvers = [
-                    maneuver for maneuver in comparison_maneuvers 
+                    maneuver
+                    for maneuver in comparison_maneuvers
                     if maneuver.maneuver_id in actual_maneuver_ids
                 ]
-                
+
                 logger.info(f"📊 Found {len(prediction_files)} prediction files")
-                logger.info(f"🎯 Using {len(consensus_maneuvers)} maneuvers for consensus (from {len(comparison_maneuvers)} available)")
+                logger.info(
+                    f"🎯 Using {len(consensus_maneuvers)} maneuvers for consensus (from {len(comparison_maneuvers)} available)"
+                )
             else:
                 logger.warning("No model prediction directories found")
                 consensus_maneuvers = []
@@ -477,7 +496,9 @@ def run_consensus_phase(
                 consensus_maneuvers, target_models=args.models, save_consensus=True
             )
         else:
-            logger.error("❌ No valid consensus maneuvers found - skipping consensus evaluation")
+            logger.error(
+                "❌ No valid consensus maneuvers found - skipping consensus evaluation"
+            )
             consensus_results = {}
 
         if consensus_results:
@@ -1055,14 +1076,60 @@ def main():
         with open(args.config, "r") as f:
             base_config = yaml.safe_load(f)
 
-        # Generate data selection manifests
-        # Get comparison clip count from config (full dataset)
-        comparison_clips_config = base_config.get("evaluation", {}).get("comprehensive_test", {}).get("num_clips", 200)
-        
+        # Determine optuna clips with backward compatibility
+        if args.optuna_max_clips is not None:
+            optuna_clips = args.optuna_max_clips
+            logger.info(f"🔧 Using --optuna-max-clips: {optuna_clips}")
+        elif args.max_clips is not None:
+            optuna_clips = args.max_clips
+            logger.warning(
+                "⚠️ --max-clips is deprecated for optuna phase. Use --optuna-max-clips instead"
+            )
+            logger.info(f"🔧 Using --max-clips for optuna: {optuna_clips}")
+        else:
+            optuna_clips = None
+            logger.info("🔧 No optuna clips specified, using full dataset")
+
+        # Get comparison clip count from comparison config (defaults to quick_test, not comprehensive_test)
+        comparison_clips_config = (
+            50  # Default to quick_test size for reasonable performance
+        )
+        if args.comparison_config and Path(args.comparison_config).exists():
+            try:
+                with open(args.comparison_config, "r") as f:
+                    comparison_config = yaml.safe_load(f)
+                    # Default to quick_test for reasonable performance, comprehensive_test is opt-in
+                    comparison_clips_config = (
+                        comparison_config.get("evaluation", {})
+                        .get("quick_test", {})
+                        .get("num_clips", 50)
+                    )
+                    logger.info(
+                        f"📊 Using comparison config quick_test clips: {comparison_clips_config}"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"⚠️ Failed to load comparison config: {e}, using default: {comparison_clips_config}"
+                )
+
+        # Determine comparison clips with backward compatibility
+        if args.comparison_max_clips is not None:
+            comparison_clips = args.comparison_max_clips
+            logger.info(f"🔧 Using --comparison-max-clips: {comparison_clips}")
+        elif args.max_clips is not None:
+            comparison_clips = args.max_clips  # Backward compatibility (old behavior)
+            logger.warning(
+                "⚠️ --max-clips is deprecated for comparison phase. Use --comparison-max-clips instead"
+            )
+            logger.info(f"🔧 Using --max-clips for comparison: {comparison_clips}")
+        else:
+            comparison_clips = comparison_clips_config  # From config
+            logger.info(f"📊 Using comparison config clips: {comparison_clips}")
+
         manifest_paths = run_manager.generate_data_selections(
             config=base_config,
-            optuna_max_clips=args.max_clips,                    # User-specified (small subset)
-            comparison_max_clips=comparison_clips_config,       # Config-specified (full dataset)
+            optuna_max_clips=optuna_clips,  # New parameter logic
+            comparison_max_clips=comparison_clips,  # New parameter logic
         )
 
         # Load pre-selected data from manifests
