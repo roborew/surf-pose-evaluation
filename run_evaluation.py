@@ -433,13 +433,52 @@ def run_consensus_phase(
                 f"🔗 Updated consensus evaluator to use prediction path: {run_manager.predictions_dir}"
             )
 
-        # Run consensus evaluation
-        logger.info(
-            f"🚀 Starting consensus evaluation with {len(comparison_maneuvers)} maneuvers"
-        )
-        consensus_results = consensus_evaluator.run_consensus_evaluation(
-            comparison_maneuvers, target_models=args.models, save_consensus=True
-        )
+        # Run consensus evaluation using maneuvers that actually have prediction files
+        logger.info("🔍 Determining consensus dataset from available prediction files...")
+        
+        # Get maneuvers that actually have prediction files (from comparison phase execution)
+        prediction_dir = run_manager.predictions_dir
+        if prediction_dir.exists() and list(prediction_dir.iterdir()):
+            # Find a model directory that has predictions
+            model_dirs = [d for d in prediction_dir.iterdir() if d.is_dir()]
+            if model_dirs:
+                sample_model_dir = model_dirs[0]
+                prediction_files = list(sample_model_dir.glob("*_predictions.json"))
+                
+                # Extract maneuver IDs from prediction files
+                actual_maneuver_ids = set()
+                for pred_file in prediction_files:
+                    try:
+                        with open(pred_file, 'r') as f:
+                            pred_data = json.load(f)
+                            maneuver_id = pred_data.get('maneuver_id')
+                            if maneuver_id:
+                                actual_maneuver_ids.add(maneuver_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to read prediction file {pred_file}: {e}")
+                
+                # Filter comparison_maneuvers to only include those with predictions
+                consensus_maneuvers = [
+                    maneuver for maneuver in comparison_maneuvers 
+                    if maneuver.maneuver_id in actual_maneuver_ids
+                ]
+                
+                logger.info(f"📊 Found {len(prediction_files)} prediction files")
+                logger.info(f"🎯 Using {len(consensus_maneuvers)} maneuvers for consensus (from {len(comparison_maneuvers)} available)")
+            else:
+                logger.warning("No model prediction directories found")
+                consensus_maneuvers = []
+        else:
+            logger.warning("Prediction directory not found or empty")
+            consensus_maneuvers = []
+
+        if consensus_maneuvers:
+            consensus_results = consensus_evaluator.run_consensus_evaluation(
+                consensus_maneuvers, target_models=args.models, save_consensus=True
+            )
+        else:
+            logger.error("❌ No valid consensus maneuvers found - skipping consensus evaluation")
+            consensus_results = {}
 
         if consensus_results:
             logger.info("✅ Consensus evaluation completed successfully")
