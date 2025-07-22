@@ -1017,10 +1017,13 @@ def main():
             base_config = yaml.safe_load(f)
 
         # Generate data selection manifests
+        # Get comparison clip count from config (full dataset)
+        comparison_clips_config = base_config.get("evaluation", {}).get("comprehensive_test", {}).get("num_clips", 200)
+        
         manifest_paths = run_manager.generate_data_selections(
             config=base_config,
-            optuna_max_clips=args.max_clips,  # Smaller subset for Optuna
-            comparison_max_clips=args.max_clips,  # Full requested set for comparison
+            optuna_max_clips=args.max_clips,                    # User-specified (small subset)
+            comparison_max_clips=comparison_clips_config,       # Config-specified (full dataset)
         )
 
         # Load pre-selected data from manifests

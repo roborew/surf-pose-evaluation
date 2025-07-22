@@ -66,6 +66,27 @@ class ConsensusEvaluator:
         )
         logger.info(f"📊 Reference models: {self.reference_models}")
 
+        # Verify we're using comparison phase data (data consistency check)
+        if (
+            hasattr(self.pose_evaluator, "run_manager")
+            and self.pose_evaluator.run_manager
+        ):
+            predictions_dir = self.pose_evaluator.run_manager.predictions_dir
+            logger.info(f"🔍 Using prediction files from: {predictions_dir}")
+
+            # Verify this is comparison phase data (should have more files than optuna)
+            if predictions_dir.exists():
+                model_dirs = [d for d in predictions_dir.iterdir() if d.is_dir()]
+                if model_dirs:
+                    sample_model_dir = model_dirs[0]
+                    file_count = len(list(sample_model_dir.glob("*_predictions.json")))
+                    logger.info(f"📁 Found {file_count} prediction files per model")
+
+                    if file_count < 20:  # Arbitrary threshold
+                        logger.warning(
+                            "⚠️ Low prediction file count - ensure this is comparison phase data, not optuna phase"
+                        )
+
         # Step 1: Load cached predictions from reference models
         logger.info("🔄 Step 1: Loading cached predictions from reference models...")
         self._run_reference_models(maneuvers)
