@@ -28,7 +28,7 @@ data_source:
       balanced_distribution: true
       force_no_zoom_in_val: true
   camera_selection:
-    enabled_cameras: ["SONY_300", "SONY_70"] # Production uses both cameras
+    enabled_cameras: ["SONY_300"] # Production uses both cameras
     max_clips_per_session: 50 # Reasonable subset for optimization speed
 
 # Model Configuration
