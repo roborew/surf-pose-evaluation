@@ -538,6 +538,7 @@ class ConsensusEvaluator:
                         persons = frame.get("persons", [])
                         total_persons += len(persons)
                         for person in persons:
+                            # Try person-level scores first (some models)
                             scores = person.get("scores", [])
                             if scores and hasattr(scores, "__iter__"):
                                 try:
@@ -550,6 +551,20 @@ class ConsensusEvaluator:
                                     )
                                 except (ValueError, TypeError):
                                     pass
+
+                            # Also extract keypoint-level confidence scores (most models)
+                            keypoints = person.get("keypoints", [])
+                            if keypoints:
+                                for keypoint in keypoints:
+                                    if isinstance(keypoint, dict):
+                                        confidence = keypoint.get("confidence")
+                                        if confidence is not None:
+                                            try:
+                                                all_confidences.append(
+                                                    float(confidence)
+                                                )
+                                            except (ValueError, TypeError):
+                                                pass
 
                     avg_confidence = (
                         np.mean(all_confidences) if all_confidences else 0.0
@@ -589,6 +604,7 @@ class ConsensusEvaluator:
                                 persons = frame.get("persons", [])
                                 ref_total_persons += len(persons)
                                 for person in persons:
+                                    # Try person-level scores first (some models)
                                     scores = person.get("scores", [])
                                     if scores and hasattr(scores, "__iter__"):
                                         try:
@@ -601,6 +617,20 @@ class ConsensusEvaluator:
                                             )
                                         except (ValueError, TypeError):
                                             pass
+
+                                    # Also extract keypoint-level confidence scores (most models)
+                                    keypoints = person.get("keypoints", [])
+                                    if keypoints:
+                                        for keypoint in keypoints:
+                                            if isinstance(keypoint, dict):
+                                                confidence = keypoint.get("confidence")
+                                                if confidence is not None:
+                                                    try:
+                                                        ref_all_confidences.append(
+                                                            float(confidence)
+                                                        )
+                                                    except (ValueError, TypeError):
+                                                        pass
 
                             ref_avg_confidence = (
                                 np.mean(ref_all_confidences)
