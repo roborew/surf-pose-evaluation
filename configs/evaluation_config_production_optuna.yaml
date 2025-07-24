@@ -49,7 +49,7 @@ evaluation:
   quick_test:
     enabled: true
     num_clips: 20
-    models: ["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose", "mmpose"] # Fast model for quick validation
+    models: ["yolov8_pose", "pytorch_pose", "mmpose"] # Fast model for quick validation
   comprehensive_test:
     enabled: true
     num_clips: 50 # Smaller for optimization speed
