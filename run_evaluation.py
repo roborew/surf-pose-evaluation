@@ -54,12 +54,22 @@ def parse_arguments():
     parser.add_argument(
         "--optuna-max-clips",
         type=int,
-        help="Maximum number of clips for Optuna optimization phase",
+        help="Maximum number of clips for Optuna optimization phase (overrides config file and --eval-mode)",
     )
     parser.add_argument(
         "--comparison-max-clips",
         type=int,
-        help="Maximum number of clips for comparison phase. If not specified, uses config value",
+        help="Maximum number of clips for comparison phase (overrides config file and --eval-mode)",
+    )
+    parser.add_argument(
+        "--eval-mode",
+        type=str,
+        choices=["quick", "comprehensive", "auto"],
+        default="comprehensive",
+        help="""Evaluation mode (default: comprehensive):
+  quick        - Use quick_test from configs (faster, fewer clips)
+  comprehensive - Use comprehensive_test from configs (thorough, more clips)  
+  auto         - Use whatever is enabled in each config file""",
     )
     parser.add_argument(
         "--config",
@@ -98,6 +108,192 @@ def parse_arguments():
     )
 
     return parser.parse_args()
+
+
+def get_clips_from_config(
+    config_path: str, eval_mode: str = "comprehensive"
+) -> Optional[int]:
+    """Extract clip count from config based on evaluation mode
+
+    Args:
+        config_path: Path to configuration file
+        eval_mode: Evaluation mode ("quick", "comprehensive", "auto")
+
+    Returns:
+        Number of clips from config, or None if not found
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+
+        eval_config = config.get("evaluation", {})
+
+        if eval_mode == "comprehensive":
+            # Try comprehensive_test first
+            if eval_config.get("comprehensive_test", {}).get("enabled", False):
+                clips = eval_config["comprehensive_test"].get("num_clips")
+                if clips is not None:
+                    logger.info(
+                        f"📊 Using comprehensive_test clips from {Path(config_path).name}: {clips}"
+                    )
+                    return clips
+        elif eval_mode == "quick":
+            # Try quick_test first
+            if eval_config.get("quick_test", {}).get("enabled", False):
+                clips = eval_config["quick_test"].get("num_clips")
+                if clips is not None:
+                    logger.info(
+                        f"⚡ Using quick_test clips from {Path(config_path).name}: {clips}"
+                    )
+                    return clips
+        elif eval_mode == "auto":
+            # Current behavior - try comprehensive, then quick
+            if eval_config.get("comprehensive_test", {}).get("enabled", False):
+                clips = eval_config["comprehensive_test"].get("num_clips")
+                if clips is not None:
+                    logger.info(
+                        f"📊 Auto-detected comprehensive_test clips from {Path(config_path).name}: {clips}"
+                    )
+                    return clips
+            elif eval_config.get("quick_test", {}).get("enabled", False):
+                clips = eval_config["quick_test"].get("num_clips")
+                if clips is not None:
+                    logger.info(
+                        f"⚡ Auto-detected quick_test clips from {Path(config_path).name}: {clips}"
+                    )
+                    return clips
+
+        # Fallback: try the other mode if primary mode didn't work
+        if eval_mode == "comprehensive":
+            if eval_config.get("quick_test", {}).get("enabled", False):
+                clips = eval_config["quick_test"].get("num_clips")
+                if clips is not None:
+                    logger.warning(
+                        f"⚠️ comprehensive_test not available, falling back to quick_test: {clips}"
+                    )
+                    return clips
+        elif eval_mode == "quick":
+            if eval_config.get("comprehensive_test", {}).get("enabled", False):
+                clips = eval_config["comprehensive_test"].get("num_clips")
+                if clips is not None:
+                    logger.warning(
+                        f"⚠️ quick_test not available, falling back to comprehensive_test: {clips}"
+                    )
+                    return clips
+
+        logger.warning(
+            f"⚠️ No valid evaluation config found in {Path(config_path).name}"
+        )
+        return None
+
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to load config {config_path}: {e}")
+        return None
+
+
+def resolve_clip_counts(
+    args, optuna_config_path: str, comparison_config_path: str
+) -> tuple[Optional[int], Optional[int]]:
+    """Resolve clip counts using the new configuration hierarchy
+
+    Priority (highest to lowest):
+    1. CLI Parameters (--optuna-max-clips, --comparison-max-clips)
+    2. Legacy CLI Parameter (--max-clips) with deprecation warning
+    3. Evaluation Mode + Config Files (--eval-mode)
+    4. None (full dataset)
+
+    Args:
+        args: Parsed command line arguments
+        optuna_config_path: Path to Optuna configuration file
+        comparison_config_path: Path to comparison configuration file
+
+    Returns:
+        Tuple of (optuna_clips, comparison_clips)
+    """
+    logger = logging.getLogger(__name__)
+
+    # Resolve Optuna clips
+    if args.optuna_max_clips is not None:
+        optuna_clips = args.optuna_max_clips
+        logger.info(f"🔧 Using CLI --optuna-max-clips: {optuna_clips}")
+    elif args.max_clips is not None:  # backward compatibility
+        optuna_clips = args.max_clips
+        logger.warning(
+            "⚠️ --max-clips is deprecated for optuna phase. Use --optuna-max-clips instead"
+        )
+        logger.info(f"🔧 Using deprecated --max-clips for optuna: {optuna_clips}")
+    else:
+        # Get from config based on eval_mode
+        optuna_clips = get_clips_from_config(optuna_config_path, args.eval_mode)
+        if optuna_clips is None:
+            logger.info("🔧 No optuna clips specified, using full dataset")
+
+    # Resolve Comparison clips
+    if args.comparison_max_clips is not None:
+        comparison_clips = args.comparison_max_clips
+        logger.info(f"🔧 Using CLI --comparison-max-clips: {comparison_clips}")
+    elif args.max_clips is not None:  # backward compatibility
+        comparison_clips = args.max_clips
+        logger.warning(
+            "⚠️ --max-clips is deprecated for comparison phase. Use --comparison-max-clips instead"
+        )
+        logger.info(
+            f"🔧 Using deprecated --max-clips for comparison: {comparison_clips}"
+        )
+    else:
+        # Get from config based on eval_mode
+        comparison_clips = get_clips_from_config(comparison_config_path, args.eval_mode)
+        if comparison_clips is None:
+            logger.warning("⚠️ No comparison clips found in config, using default: 50")
+            comparison_clips = 50  # Safe fallback
+
+    return optuna_clips, comparison_clips
+
+
+def validate_parameters(args) -> tuple[list[str], list[str]]:
+    """Validate parameter combinations and provide clear error messages
+
+    Args:
+        args: Parsed command line arguments
+
+    Returns:
+        Tuple of (errors, warnings) as lists of strings
+    """
+    errors = []
+    warnings = []
+
+    # Check for deprecated usage
+    if args.max_clips is not None:
+        warnings.append(
+            "--max-clips is deprecated. Use --optuna-max-clips and --comparison-max-clips for better control"
+        )
+
+    # Check for conflicting phase options
+    phase_options = [
+        args.skip_optuna,
+        args.skip_comparison,
+        args.optuna_only,
+        args.comparison_only,
+    ]
+    if sum(phase_options) > 1:
+        errors.append(
+            "Cannot combine multiple phase control options (--skip-optuna, --skip-comparison, --optuna-only, --comparison-only)"
+        )
+
+    # Validate config files exist
+    if not Path(args.config).exists():
+        errors.append(f"Optuna config file not found: {args.config}")
+
+    if not Path(args.comparison_config).exists():
+        errors.append(f"Comparison config file not found: {args.comparison_config}")
+
+    # Validate eval_mode (should be caught by argparse, but double-check)
+    if args.eval_mode not in ["quick", "comprehensive", "auto"]:
+        errors.append(f"Invalid eval-mode: {args.eval_mode}")
+
+    return errors, warnings
 
 
 def run_optuna_phase(run_manager: RunManager, args, optuna_maneuvers: List) -> Dict:
@@ -1047,6 +1243,21 @@ def main():
     # Parse arguments
     args = parse_arguments()
 
+    # Validate parameters and display errors/warnings
+    errors, warnings = validate_parameters(args)
+
+    if warnings:
+        for warning in warnings:
+            print(f"⚠️ WARNING: {warning}")
+        print()  # Add blank line after warnings
+
+    if errors:
+        print("❌ CONFIGURATION ERRORS:")
+        for error in errors:
+            print(f"   • {error}")
+        print("\nPlease fix the above errors and try again.")
+        sys.exit(1)
+
     # Initialize run manager (always organized)
     run_manager = RunManager(run_name=args.run_name, max_clips=args.max_clips)
 
@@ -1072,64 +1283,20 @@ def main():
         # Generate centralized data selections ONCE for all phases
         logger.info("🎯 Generating centralized data selections...")
 
-        # Load base config to determine proper max_clips for each phase
+        # Load base config
         with open(args.config, "r") as f:
             base_config = yaml.safe_load(f)
 
-        # Determine optuna clips with backward compatibility
-        if args.optuna_max_clips is not None:
-            optuna_clips = args.optuna_max_clips
-            logger.info(f"🔧 Using --optuna-max-clips: {optuna_clips}")
-        elif args.max_clips is not None:
-            optuna_clips = args.max_clips
-            logger.warning(
-                "⚠️ --max-clips is deprecated for optuna phase. Use --optuna-max-clips instead"
-            )
-            logger.info(f"🔧 Using --max-clips for optuna: {optuna_clips}")
-        else:
-            optuna_clips = None
-            logger.info("🔧 No optuna clips specified, using full dataset")
-
-        # Get comparison clip count from comparison config (defaults to quick_test, not comprehensive_test)
-        comparison_clips_config = (
-            50  # Default to quick_test size for reasonable performance
+        # Use new configuration resolution system
+        logger.info(f"🎛️ Using evaluation mode: {args.eval_mode}")
+        optuna_clips, comparison_clips = resolve_clip_counts(
+            args, args.config, args.comparison_config
         )
-        if args.comparison_config and Path(args.comparison_config).exists():
-            try:
-                with open(args.comparison_config, "r") as f:
-                    comparison_config = yaml.safe_load(f)
-                    # Default to quick_test for reasonable performance, comprehensive_test is opt-in
-                    comparison_clips_config = (
-                        comparison_config.get("evaluation", {})
-                        .get("quick_test", {})
-                        .get("num_clips", 50)
-                    )
-                    logger.info(
-                        f"📊 Using comparison config quick_test clips: {comparison_clips_config}"
-                    )
-            except Exception as e:
-                logger.warning(
-                    f"⚠️ Failed to load comparison config: {e}, using default: {comparison_clips_config}"
-                )
-
-        # Determine comparison clips with backward compatibility
-        if args.comparison_max_clips is not None:
-            comparison_clips = args.comparison_max_clips
-            logger.info(f"🔧 Using --comparison-max-clips: {comparison_clips}")
-        elif args.max_clips is not None:
-            comparison_clips = args.max_clips  # Backward compatibility (old behavior)
-            logger.warning(
-                "⚠️ --max-clips is deprecated for comparison phase. Use --comparison-max-clips instead"
-            )
-            logger.info(f"🔧 Using --max-clips for comparison: {comparison_clips}")
-        else:
-            comparison_clips = comparison_clips_config  # From config
-            logger.info(f"📊 Using comparison config clips: {comparison_clips}")
 
         manifest_paths = run_manager.generate_data_selections(
             config=base_config,
-            optuna_max_clips=optuna_clips,  # New parameter logic
-            comparison_max_clips=comparison_clips,  # New parameter logic
+            optuna_max_clips=optuna_clips,
+            comparison_max_clips=comparison_clips,
         )
 
         # Load pre-selected data from manifests

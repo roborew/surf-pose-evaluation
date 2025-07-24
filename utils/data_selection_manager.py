@@ -87,9 +87,11 @@ class DataSelectionManager:
         # Generate comparison selection first (larger set) - this is the base dataset
         comparison_clips = []
         if comparison_max_clips:
-            logger.info(f"📝 Generating comparison selection ({comparison_max_clips} clips)")
+            logger.info(
+                f"📝 Generating comparison selection ({comparison_max_clips} clips)"
+            )
             comparison_clips = self._select_clips_balanced(
-                all_clips, comparison_max_clips, random_seed    # Use base seed
+                all_clips, comparison_max_clips, random_seed  # Use base seed
             )
             comparison_manifest = self._create_selection_manifest(
                 "comparison",
@@ -105,9 +107,13 @@ class DataSelectionManager:
 
         # Generate Optuna selection as subset of comparison clips
         if optuna_max_clips and comparison_clips:
-            logger.info(f"📝 Generating Optuna selection ({optuna_max_clips} clips) as subset of comparison")
+            logger.info(
+                f"📝 Generating Optuna selection ({optuna_max_clips} clips) as subset of comparison"
+            )
             # Take first N clips from comparison set to ensure subset relationship
-            optuna_clips = comparison_clips[:min(optuna_max_clips, len(comparison_clips))]
+            optuna_clips = comparison_clips[
+                : min(optuna_max_clips, len(comparison_clips))
+            ]
             optuna_manifest = self._create_selection_manifest(
                 "optuna", optuna_clips, optuna_max_clips, random_seed, video_format
             )
@@ -117,12 +123,25 @@ class DataSelectionManager:
             manifest_paths["optuna"] = optuna_path
         elif optuna_max_clips and not comparison_clips:
             # Fallback: generate optuna independently if no comparison
-            logger.info(f"📝 Generating independent Optuna selection ({optuna_max_clips} clips)")
+            logger.info(
+                f"📝 Generating independent Optuna selection ({optuna_max_clips} clips)"
+            )
             optuna_clips = self._select_clips_balanced(
                 all_clips, optuna_max_clips, random_seed
             )
             optuna_manifest = self._create_selection_manifest(
                 "optuna", optuna_clips, optuna_max_clips, random_seed, video_format
+            )
+            optuna_path = self._save_selection_manifest(
+                optuna_manifest, "optuna_selection.json"
+            )
+            manifest_paths["optuna"] = optuna_path
+        elif optuna_max_clips is None:
+            # CRITICAL FIX: Use full dataset for Optuna when no limit specified
+            logger.info("📝 Generating Optuna selection (full dataset)")
+            optuna_clips = all_clips  # Use all available clips
+            optuna_manifest = self._create_selection_manifest(
+                "optuna", optuna_clips, len(optuna_clips), random_seed, video_format
             )
             optuna_path = self._save_selection_manifest(
                 optuna_manifest, "optuna_selection.json"
