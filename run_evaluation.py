@@ -488,7 +488,6 @@ def run_comparison_phase(
     args,
     comparison_maneuvers: List,
     visualization_manifest_path: str,
-    coco_results: Optional[Dict] = None,
 ) -> Dict:
     """Run comprehensive comparison phase with pre-selected data"""
     logger = logging.getLogger(__name__)
@@ -1388,7 +1387,6 @@ def main():
                     args,
                     comparison_maneuvers,
                     visualization_manifest_path,
-                    coco_results,
                 )
 
                 # Step 3b: Run consensus evaluation to add relative PCK metrics
