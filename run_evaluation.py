@@ -552,13 +552,6 @@ def run_comparison_phase(
                 model_name, comparison_maneuvers, visualization_manifest_path
             )
 
-            # Merge COCO validation results if available
-            if coco_results and model_name in coco_results:
-                coco_metrics = coco_results[model_name]
-                if isinstance(model_result, dict) and isinstance(coco_metrics, dict):
-                    model_result.update(coco_metrics)
-                    logger.info(f"Merged COCO validation results for {model_name}")
-
             # Log metrics to MLflow - Fix: Access metrics correctly
             if isinstance(model_result, dict) and "error" not in model_result:
                 # Log all available metrics
