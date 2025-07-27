@@ -865,6 +865,55 @@ def generate_summary_report(
             logger.error("❌ No comparison runs found")
             return False
 
+        # Get COCO validation data from separate COCO experiment
+        coco_data = {}
+        try:
+            # Find COCO validation experiment
+            all_experiments = mlflow.search_experiments()
+            coco_experiments = [
+                exp
+                for exp in all_experiments
+                if "coco" in exp.name.lower() and "validation" in exp.name.lower()
+            ]
+
+            if coco_experiments:
+                coco_experiment = coco_experiments[0]  # Use the most recent one
+                logger.info(f"Found COCO experiment: {coco_experiment.name}")
+
+                # Get COCO runs
+                coco_runs = mlflow.search_runs(
+                    experiment_ids=[coco_experiment.experiment_id]
+                )
+
+                # Create mapping of model_name -> COCO metrics
+                for _, coco_run in coco_runs.iterrows():
+                    model_name = coco_run.get("params.model_name")
+                    if model_name:
+                        coco_data[model_name] = {
+                            "coco_pck_0.1": coco_run.get("metrics.coco_pck_0.1"),
+                            "coco_pck_0.2": coco_run.get("metrics.coco_pck_0.2"),
+                            "coco_pck_0.3": coco_run.get("metrics.coco_pck_0.3"),
+                            "coco_pck_0.5": coco_run.get("metrics.coco_pck_0.5"),
+                            "coco_pck_error_mean": coco_run.get(
+                                "metrics.coco_pck_error_mean"
+                            ),
+                            "coco_detection_f1": coco_run.get(
+                                "metrics.coco_detection_f1"
+                            ),
+                            "coco_fps_mean": coco_run.get("metrics.coco_fps_mean"),
+                            "coco_inference_time_ms": coco_run.get(
+                                "metrics.coco_inference_time_ms"
+                            ),
+                            "coco_images_processed": coco_run.get(
+                                "metrics.coco_total_images_processed"
+                            ),
+                        }
+                logger.info(f"Retrieved COCO data for {len(coco_data)} models")
+            else:
+                logger.warning("⚠️ No COCO validation experiment found")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not retrieve COCO data: {e}")
+
         # Create summary
         summary = {
             "evaluation_date": datetime.now().isoformat(),
@@ -894,13 +943,25 @@ def generate_summary_report(
                     "consensus_confidence": run.get(
                         "metrics.pose_consensus_confidence_mean", None
                     ),
-                    # COCO Ground Truth Validation - REFERENCE METRICS
-                    "coco_pck_0.1": run.get("metrics.coco_pck_0.1", None),
-                    "coco_pck_0.2": run.get("metrics.coco_pck_0.2", None),
-                    "coco_pck_0.3": run.get("metrics.coco_pck_0.3", None),
-                    "coco_pck_0.5": run.get("metrics.coco_pck_0.5", None),
-                    "coco_pck_error_mean": run.get("metrics.coco_pck_error_mean", None),
-                    "coco_detection_f1": run.get("metrics.coco_detection_f1", None),
+                    # COCO Ground Truth Validation - REFERENCE METRICS (from separate COCO experiment)
+                    "coco_pck_0.1": coco_data.get(
+                        run.get("params.model_name", ""), {}
+                    ).get("coco_pck_0.1", None),
+                    "coco_pck_0.2": coco_data.get(
+                        run.get("params.model_name", ""), {}
+                    ).get("coco_pck_0.2", None),
+                    "coco_pck_0.3": coco_data.get(
+                        run.get("params.model_name", ""), {}
+                    ).get("coco_pck_0.3", None),
+                    "coco_pck_0.5": coco_data.get(
+                        run.get("params.model_name", ""), {}
+                    ).get("coco_pck_0.5", None),
+                    "coco_pck_error_mean": coco_data.get(
+                        run.get("params.model_name", ""), {}
+                    ).get("coco_pck_error_mean", None),
+                    "coco_detection_f1": coco_data.get(
+                        run.get("params.model_name", ""), {}
+                    ).get("coco_detection_f1", None),
                     # Enhanced detection metrics
                     "pose_stability_mean": run.get(
                         "metrics.pose_pose_stability_mean_mean", None
@@ -927,14 +988,16 @@ def generate_summary_report(
                     "memory_usage_mb": run.get(
                         "metrics.perf_max_memory_usage_mean", None
                     ),  # Already in MB from the evaluator
-                    # COCO validation performance
-                    "coco_fps_mean": run.get("metrics.coco_fps_mean", None),
-                    "coco_inference_time_ms": run.get(
-                        "metrics.coco_inference_time_ms", None
-                    ),
-                    "coco_images_processed": run.get(
-                        "metrics.coco_total_images_processed", None
-                    ),
+                    # COCO validation performance (from separate COCO experiment)
+                    "coco_fps_mean": coco_data.get(
+                        run.get("params.model_name", ""), {}
+                    ).get("coco_fps_mean", None),
+                    "coco_inference_time_ms": coco_data.get(
+                        run.get("params.model_name", ""), {}
+                    ).get("coco_inference_time_ms", None),
+                    "coco_images_processed": coco_data.get(
+                        run.get("params.model_name", ""), {}
+                    ).get("coco_images_processed", None),
                     # Model characteristics
                     "model_size_mb": run.get("metrics.perf_model_size_mb_mean", None),
                     "memory_efficiency": run.get(
