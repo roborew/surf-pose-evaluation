@@ -21,6 +21,7 @@ sys.path.append(str(Path(__file__).parent))
 from utils.run_manager import RunManager
 from utils.pose_evaluator import PoseEvaluator
 from utils.optuna_optimizer import OptunaPoseOptimizer
+from utils.memory_profiler import MemoryProfiler
 
 
 def parse_arguments():
@@ -1424,7 +1425,19 @@ def main():
 
     success = True
 
+    # Initialize memory profiler
+    memory_profiler = MemoryProfiler(
+        enable_tracemalloc=True,
+        monitoring_interval=2.0,  # 2-second intervals for detailed tracking
+        enable_continuous_monitoring=True,
+        save_snapshots=True,
+    )
+
     try:
+        # Start memory profiling
+        memory_profiler.start_profiling(run_manager.run_dir)
+        memory_profiler.log_milestone("run_started")
+
         # Generate centralized data selections ONCE for all phases
         logger.info("🎯 Generating centralized data selections...")
 
@@ -1488,11 +1501,13 @@ def main():
 
         # Phase 1: Optuna Optimization
         if not args.skip_optuna and not args.comparison_only:
+            memory_profiler.log_milestone("optuna_phase_start")
             if optuna_maneuvers:
                 optuna_result = run_optuna_phase(run_manager, args, optuna_maneuvers)
                 results["optuna_phase"] = "completed"
                 results["configs_used"].append(optuna_result["config_path"])
                 results["optuna_results"] = optuna_result["results"]
+                memory_profiler.log_milestone("optuna_phase_completed")
             else:
                 logger.warning("⚠️ No Optuna data available, skipping optimization")
                 results["optuna_phase"] = "skipped"
@@ -1536,6 +1551,7 @@ def main():
 
         # Phase 3: Production Dataset Comparison (Multi-step)
         if not args.skip_comparison and not args.optuna_only:
+            memory_profiler.log_milestone("comparison_phase_start")
             if comparison_maneuvers:
                 # Step 3a: Run individual model evaluations
                 logger.info("📊 Step 3a: Running individual model evaluations...")
@@ -1545,6 +1561,7 @@ def main():
                     comparison_maneuvers,
                     visualization_manifest_path,
                 )
+                memory_profiler.log_milestone("individual_model_evaluations_completed")
 
                 # Step 3b: Run consensus evaluation to add relative PCK metrics
                 logger.info("🎯 Step 3b: Calculating consensus-based metrics...")
@@ -1636,6 +1653,7 @@ def main():
                 results["comparison_phase"] = "completed"
                 results["configs_used"].append(comparison_result["config_path"])
                 results["comparison_results"] = comparison_result["results"]
+                memory_profiler.log_milestone("comparison_phase_completed")
 
                 # Generate summary report
                 if not generate_summary_report(
@@ -1643,6 +1661,7 @@ def main():
                 ):
                     logger.error("❌ Failed at summary generation phase")
                     success = False
+                memory_profiler.log_milestone("summary_report_generated")
             else:
                 logger.warning("⚠️ No comparison data available, skipping comparison")
                 results["comparison_phase"] = "skipped"
@@ -1716,6 +1735,7 @@ def main():
             )
 
     except Exception as e:
+        memory_profiler.log_milestone("evaluation_failed")
         # Calculate total time even on failure
         total_time = time.time() - start_time
         hours = int(total_time // 3600)
@@ -1738,6 +1758,53 @@ def main():
         results["error"] = str(e)
         run_manager.create_run_summary(results)
         success = False
+
+    finally:
+        # Stop memory profiling and generate final report
+        try:
+            memory_profiler.log_milestone("evaluation_finished")
+            final_memory_stats = memory_profiler.stop_profiling()
+
+            # Log final memory statistics to MLflow
+            try:
+                import mlflow
+
+                if final_memory_stats and "statistics" in final_memory_stats:
+                    stats = final_memory_stats["statistics"]
+                    mlflow.log_metric(
+                        "final_memory_peak_mb", stats["process_memory"]["peak_mb"]
+                    )
+                    mlflow.log_metric(
+                        "final_memory_increase_mb",
+                        stats["process_memory"]["increase_from_start_mb"],
+                    )
+                    mlflow.log_metric(
+                        "final_cpu_peak_percent", stats["cpu"]["peak_percent"]
+                    )
+                    if "gpu" in stats:
+                        mlflow.log_metric("final_gpu_peak_mb", stats["gpu"]["peak_mb"])
+
+                    # Log memory efficiency analysis
+                    if "analysis" in final_memory_stats:
+                        analysis = final_memory_stats["analysis"]
+                        mlflow.log_metric(
+                            "memory_growth_rate_mb_per_sec",
+                            analysis["memory_growth_rate_mb_per_second"],
+                        )
+                        mlflow.log_param(
+                            "memory_efficiency", analysis["memory_efficiency"]
+                        )
+                        mlflow.log_param(
+                            "potential_memory_leak", analysis["potential_memory_leak"]
+                        )
+            except Exception as e:
+                logger.error(f"Failed to log final memory stats to MLflow: {e}")
+
+            logger.info(
+                f"📊 Memory profiling completed. Peak memory: {final_memory_stats['statistics']['process_memory']['peak_mb']:.1f}MB"
+            )
+        except Exception as e:
+            logger.error(f"Failed to stop memory profiling: {e}")
 
     sys.exit(0 if success else 1)
 
