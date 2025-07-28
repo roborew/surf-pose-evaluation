@@ -426,13 +426,22 @@ class RunManager:
 
         logger.info(f"🧹 Cleanup complete: kept {keep_last} most recent runs")
 
-    def create_run_summary(self, results: Dict[str, Any]):
-        """Create a summary of the run results"""
+    def create_run_summary(
+        self, results: Dict[str, Any], memory_stats: Dict[str, Any] = None
+    ):
+        """Create a comprehensive summary of the run results including memory and performance metrics"""
+        import platform
+        import psutil
+
+        # Base summary structure
         summary = {
             "run_info": {
                 "name": self.run_name,
                 "timestamp": self.timestamp,
                 "completed_at": datetime.now().isoformat(),
+                "platform": platform.platform(),
+                "python_version": platform.python_version(),
+                "hostname": platform.node(),
             },
             "results": convert_numpy_types(results),
             "directories": {
@@ -443,11 +452,226 @@ class RunManager:
             },
         }
 
+        # Add comprehensive memory and performance statistics
+        if memory_stats:
+            duration_seconds = memory_stats.get("statistics", {}).get(
+                "duration_seconds", 0
+            )
+
+            # Convert duration to human-readable format
+            hours = int(duration_seconds // 3600)
+            minutes = int((duration_seconds % 3600) // 60)
+            seconds = int(duration_seconds % 60)
+
+            if hours > 0:
+                duration_human = f"{hours}h {minutes}m {seconds}s"
+            elif minutes > 0:
+                duration_human = f"{minutes}m {seconds}s"
+            else:
+                duration_human = f"{seconds}s"
+
+            summary["memory_profiling"] = {
+                "enabled": True,
+                "duration_seconds": duration_seconds,
+                "duration_human_readable": duration_human,
+                "snapshots_collected": memory_stats.get("statistics", {}).get(
+                    "snapshots_count", 0
+                ),
+                "process_memory": {
+                    "peak_mb": memory_stats.get("statistics", {})
+                    .get("process_memory", {})
+                    .get("peak_mb", 0),
+                    "mean_mb": memory_stats.get("statistics", {})
+                    .get("process_memory", {})
+                    .get("mean_mb", 0),
+                    "increase_from_start_mb": memory_stats.get("statistics", {})
+                    .get("process_memory", {})
+                    .get("increase_from_start_mb", 0),
+                    "std_mb": memory_stats.get("statistics", {})
+                    .get("process_memory", {})
+                    .get("std_mb", 0),
+                },
+                "cpu": {
+                    "peak_percent": memory_stats.get("statistics", {})
+                    .get("cpu", {})
+                    .get("peak_percent", 0),
+                    "mean_percent": memory_stats.get("statistics", {})
+                    .get("cpu", {})
+                    .get("mean_percent", 0),
+                    "std_percent": memory_stats.get("statistics", {})
+                    .get("cpu", {})
+                    .get("std_percent", 0),
+                },
+                "gpu": memory_stats.get("statistics", {}).get("gpu", {}),
+                "analysis": memory_stats.get("analysis", {}),
+                "efficiency": memory_stats.get("analysis", {}).get(
+                    "memory_efficiency", "unknown"
+                ),
+                "potential_memory_leak": memory_stats.get("analysis", {}).get(
+                    "potential_memory_leak", False
+                ),
+            }
+        else:
+            summary["memory_profiling"] = {"enabled": False}
+
+        # Add system information
+        memory_info = psutil.virtual_memory()
+        summary["system_info"] = {
+            "total_ram_gb": round(memory_info.total / (1024**3), 2),
+            "available_ram_gb": round(memory_info.available / (1024**3), 2),
+            "cpu_count": psutil.cpu_count(),
+            "cpu_count_logical": psutil.cpu_count(logical=True),
+        }
+
+        # Try to add GPU information
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                summary["system_info"]["gpu"] = {
+                    "available": True,
+                    "device_name": torch.cuda.get_device_name(0),
+                    "device_count": torch.cuda.device_count(),
+                    "total_memory_gb": round(
+                        torch.cuda.get_device_properties(0).total_memory / (1024**3), 2
+                    ),
+                }
+            else:
+                summary["system_info"]["gpu"] = {"available": False}
+        except Exception:
+            summary["system_info"]["gpu"] = {"available": "unknown"}
+
+        # Add high-level performance metrics summary
+        if "optuna_results" in results:
+            summary["performance_summary"] = self._extract_performance_summary(
+                results["optuna_results"]
+            )
+
+        # Add comparison results summary if available
+        if "comparison_results" in results:
+            summary["comparison_summary"] = self._extract_comparison_summary(
+                results["comparison_results"]
+            )
+
+        # Add COCO validation summary if available
+        if "coco_validation_results" in results:
+            summary["coco_summary"] = self._extract_coco_summary(
+                results["coco_validation_results"]
+            )
+
+        # Add data selection summary
+        if self.data_selection_manifests:
+            summary["data_selections"] = {}
+            for phase, manifest_path in self.data_selection_manifests.items():
+                try:
+                    with open(manifest_path, "r") as f:
+                        manifest_data = json.load(f)
+                    summary["data_selections"][phase] = {
+                        "total_clips": len(manifest_data.get("clips", [])),
+                        "total_maneuvers": len(
+                            set(
+                                clip.get("maneuver_id")
+                                for clip in manifest_data.get("clips", [])
+                            )
+                        ),
+                        "cameras": list(
+                            set(
+                                clip.get("camera")
+                                for clip in manifest_data.get("clips", [])
+                            )
+                        ),
+                        "manifest_path": str(manifest_path),
+                    }
+                except Exception as e:
+                    summary["data_selections"][phase] = {
+                        "error": str(e),
+                        "manifest_path": str(manifest_path),
+                    }
+
         summary_file = self.run_dir / "run_summary.json"
         with open(summary_file, "w") as f:
             json.dump(summary, f, indent=2)
 
-        logger.info(f"📊 Created run summary: {summary_file}")
+        logger.info(f"📊 Created comprehensive run summary: {summary_file}")
+
+    def _extract_performance_summary(self, optuna_results: Dict) -> Dict:
+        """Extract high-level performance metrics from Optuna results"""
+        summary = {}
+
+        for model_name, model_data in optuna_results.items():
+            if isinstance(model_data, dict):
+                summary[model_name] = {
+                    "best_trial": model_data.get("best_trial_number", "unknown"),
+                    "best_score": model_data.get("best_score", 0),
+                    "successful_maneuvers": model_data.get("successful_maneuvers", 0),
+                    "failed_maneuvers": model_data.get("failed_maneuvers", 0),
+                    "avg_fps": model_data.get("perf_fps_mean", 0),
+                    "avg_inference_time_ms": (
+                        model_data.get("perf_avg_inference_time_mean", 0) * 1000
+                        if model_data.get("perf_avg_inference_time_mean")
+                        else 0
+                    ),
+                    "avg_memory_mb": model_data.get("perf_avg_memory_usage_mean", 0),
+                    "max_memory_mb": model_data.get("perf_max_memory_usage_mean", 0),
+                    "model_size_mb": model_data.get("perf_model_size_mb_mean", 0),
+                    "avg_cpu_percent": model_data.get(
+                        "perf_avg_cpu_utilization_mean", 0
+                    ),
+                }
+
+        return summary
+
+    def _extract_comparison_summary(self, comparison_results: Dict) -> Dict:
+        """Extract high-level metrics from comparison results"""
+        summary = {}
+
+        for model_name, model_data in comparison_results.items():
+            if isinstance(model_data, dict):
+                summary[model_name] = {
+                    "detection_f1": model_data.get("pose_detection_f1_mean", 0),
+                    "consensus_pck_error": model_data.get(
+                        "pose_consensus_pck_error_mean", 0
+                    ),
+                    "consensus_pck_0.2": model_data.get(
+                        "pose_consensus_pck_0.2_mean", 0
+                    ),
+                    "consensus_coverage": model_data.get(
+                        "pose_consensus_coverage_mean", 0
+                    ),
+                    "fps_mean": model_data.get("perf_fps_mean", 0),
+                    "inference_time_ms": (
+                        model_data.get("perf_avg_inference_time_mean", 0) * 1000
+                        if model_data.get("perf_avg_inference_time_mean")
+                        else 0
+                    ),
+                    "memory_efficiency": model_data.get(
+                        "perf_memory_efficiency_mean", 0
+                    ),
+                    "successful_maneuvers": model_data.get("successful_maneuvers", 0),
+                    "failed_maneuvers": model_data.get("failed_maneuvers", 0),
+                }
+
+        return summary
+
+    def _extract_coco_summary(self, coco_results: Dict) -> Dict:
+        """Extract high-level metrics from COCO validation results"""
+        summary = {}
+
+        for model_name, model_data in coco_results.items():
+            if isinstance(model_data, dict):
+                summary[model_name] = {
+                    "pck_0.2": model_data.get("coco_pck_0.2", 0),
+                    "pck_0.5": model_data.get("coco_pck_0.5", 0),
+                    "pck_error_mean": model_data.get("coco_pck_error_mean", 0),
+                    "detection_f1": model_data.get("coco_detection_f1", 0),
+                    "fps_mean": model_data.get("coco_fps_mean", 0),
+                    "inference_time_ms": model_data.get("coco_inference_time_ms", 0),
+                    "images_processed": model_data.get(
+                        "coco_total_images_processed", 0
+                    ),
+                }
+
+        return summary
 
     def print_run_info(self):
         """Print information about this run"""

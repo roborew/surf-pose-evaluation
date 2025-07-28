@@ -1703,9 +1703,6 @@ def main():
             ),
         }
 
-        # Create run summary
-        run_manager.create_run_summary(results)
-
         if success:
             # Print final information
             print("\n" + "=" * 60)
@@ -1773,11 +1770,11 @@ def main():
             f"❌ Production evaluation failed after {results['total_execution_time']['human_readable']}: {e}"
         )
         results["error"] = str(e)
-        run_manager.create_run_summary(results)
         success = False
 
     finally:
         # Stop memory profiling and generate final report
+        final_memory_stats = None
         try:
             memory_profiler.log_milestone("evaluation_finished")
             final_memory_stats = memory_profiler.stop_profiling()
@@ -1825,11 +1822,24 @@ def main():
                     f"Failed to log final memory stats to MLflow (normal if no experiment active): {e}"
                 )
 
-            logger.info(
-                f"📊 Memory profiling completed. Peak memory: {final_memory_stats['statistics']['process_memory']['peak_mb']:.1f}MB"
-            )
+            if final_memory_stats and "statistics" in final_memory_stats:
+                logger.info(
+                    f"📊 Memory profiling completed. Peak memory: {final_memory_stats['statistics']['process_memory']['peak_mb']:.1f}MB"
+                )
         except Exception as e:
             logger.error(f"Failed to stop memory profiling: {e}")
+
+        # Create comprehensive run summary with memory statistics
+        try:
+            run_manager.create_run_summary(results, final_memory_stats)
+            logger.info("📊 Enhanced run summary created with memory profiling data")
+        except Exception as e:
+            logger.error(f"Failed to create enhanced run summary: {e}")
+            # Fallback to basic summary
+            try:
+                run_manager.create_run_summary(results)
+            except Exception as e2:
+                logger.error(f"Failed to create even basic run summary: {e2}")
 
     sys.exit(0 if success else 1)
 
