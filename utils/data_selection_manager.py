@@ -49,6 +49,7 @@ class DataSelectionManager:
         comparison_max_clips: Optional[int] = None,
         random_seed: Optional[int] = None,
         video_format: Optional[str] = None,
+        optuna_config: Optional[Dict] = None,
     ) -> Dict[str, str]:
         """Generate data selections for both Optuna and comparison phases
 
@@ -57,6 +58,7 @@ class DataSelectionManager:
             comparison_max_clips: Max clips for comparison phase
             random_seed: Random seed for reproducible selections
             video_format: Video format to use
+            optuna_config: Optional Optuna configuration for camera filtering
 
         Returns:
             Dictionary with paths to generated selection manifests
@@ -110,10 +112,26 @@ class DataSelectionManager:
             logger.info(
                 f"📝 Generating Optuna selection ({optuna_max_clips} clips) as subset of comparison"
             )
-            # Take first N clips from comparison set to ensure subset relationship
-            optuna_clips = comparison_clips[
-                : min(optuna_max_clips, len(comparison_clips))
-            ]
+            
+            # Filter comparison clips by optuna camera preferences if provided
+            if optuna_config and "data_source" in optuna_config:
+                optuna_cameras = optuna_config.get("data_source", {}).get("camera_selection", {}).get("enabled_cameras", [])
+                if optuna_cameras:
+                    logger.info(f"🎥 Filtering optuna clips to cameras: {optuna_cameras}")
+                    filtered_clips = [clip for clip in comparison_clips if clip.camera in optuna_cameras]
+                    if filtered_clips:
+                        optuna_clips = filtered_clips[:min(optuna_max_clips, len(filtered_clips))]
+                        logger.info(f"📸 Selected {len(optuna_clips)} clips from cameras {optuna_cameras}")
+                    else:
+                        logger.warning(f"⚠️ No clips found for optuna cameras {optuna_cameras}, using all comparison clips")
+                        optuna_clips = comparison_clips[:min(optuna_max_clips, len(comparison_clips))]
+                else:
+                    # No camera filter specified, use first N clips from comparison
+                    optuna_clips = comparison_clips[:min(optuna_max_clips, len(comparison_clips))]
+            else:
+                # No optuna config provided, use first N clips from comparison
+                optuna_clips = comparison_clips[:min(optuna_max_clips, len(comparison_clips))]
+            
             optuna_manifest = self._create_selection_manifest(
                 "optuna", optuna_clips, optuna_max_clips, random_seed, video_format
             )

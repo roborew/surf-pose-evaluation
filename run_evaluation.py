@@ -1338,9 +1338,19 @@ def main():
         # Generate centralized data selections ONCE for all phases
         logger.info("🎯 Generating centralized data selections...")
 
-        # Load base config
-        with open(args.config, "r") as f:
+        # Load comparison config as base (broader camera selection)
+        # This ensures both phases get the full camera coverage
+        with open(args.comparison_config, "r") as f:
             base_config = yaml.safe_load(f)
+
+        # Load optuna config for camera filtering preferences
+        with open(args.config, "r") as f:
+            optuna_config = yaml.safe_load(f)
+
+        logger.info(
+            f"🎯 Using comparison config as base for data selection (broader camera coverage)"
+        )
+        logger.info(f"🔧 Using optuna config for camera filtering preferences")
 
         # Use new configuration resolution system
         logger.info(f"🎛️ Using evaluation mode: {args.eval_mode}")
@@ -1352,6 +1362,7 @@ def main():
             config=base_config,
             optuna_max_clips=optuna_clips,
             comparison_max_clips=comparison_clips,
+            optuna_config=optuna_config,
         )
 
         # Load pre-selected data from manifests

@@ -267,13 +267,15 @@ class RunManager:
         config: Dict[str, Any],
         optuna_max_clips: Optional[int] = None,
         comparison_max_clips: Optional[int] = None,
+        optuna_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, str]:
         """Generate data selection manifests for this run
 
         Args:
-            config: Complete evaluation configuration
+            config: Complete evaluation configuration (typically comparison config with broader camera selection)
             optuna_max_clips: Max clips for Optuna phase
             comparison_max_clips: Max clips for comparison phase
+            optuna_config: Optuna-specific configuration for camera filtering
 
         Returns:
             Dictionary mapping phase names to manifest file paths
@@ -295,6 +297,7 @@ class RunManager:
             video_format=config.get("data_source", {})
             .get("video_clips", {})
             .get("input_format", "h264"),
+            optuna_config=optuna_config,
         )
 
         # Store manifest paths in run manager
