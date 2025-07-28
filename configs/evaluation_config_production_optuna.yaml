@@ -29,7 +29,7 @@ data_source:
       force_no_zoom_in_val: true
   camera_selection:
     enabled_cameras: ["SONY_300"] # Production uses both cameras
-    max_clips_per_session: 50 # Reasonable subset for optimization speed
+    max_clips_per_session: 60 # Reasonable subset for optimization speed
 
 # Model Configuration
 models:
@@ -48,11 +48,11 @@ models:
 evaluation:
   quick_test:
     enabled: true
-    num_clips: 20
+    num_clips: 25 # Increased for better optimization signal
     models: ["yolov8_pose", "pytorch_pose", "mmpose"] # Fast model for quick validation
   comprehensive_test:
     enabled: true
-    num_clips: 50 # Smaller for optimization speed
+    num_clips: 75 # Increased for more robust optimization data
     models: ["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose", "mmpose"]
 
 # Optuna Optimization
@@ -60,12 +60,12 @@ optuna:
   enabled: true
   study_name: "surf_pose_optimization_production"
   direction: "maximize" # Maximize PCK accuracy
-  n_trials: 100 # Thorough optimization
+  n_trials: 200 # Thorough optimization
   timeout_minutes: 300 # 5 hours max per model
   sampler: "TPESampler"
   pruner: "MedianPruner"
 
-  # Intelligent early stopping configuration
+  # Intelligent early stopping configuration (optimized based on test results)
   early_stopping:
     enabled: true
     patience: 10 # Stop if no improvement for 10 trials
@@ -73,7 +73,7 @@ optuna:
     improvement_threshold: 0.001 # Minimum improvement to continue
     plateau_threshold: 0.95 # Consider plateaued if within 95% of best
 
-  # Model-specific optimization settings
+  # Model-specific optimization settings (optimized based on test performance)
   model_settings:
     mediapipe:
       expected_trials: 20 # Fast model, fewer trials needed
@@ -96,7 +96,7 @@ performance:
   max_workers: 8 # Full utilization for production
   batch_size: 1
   device: "auto" # Auto-detect: CUDA first, then MPS/CPU
-  memory_limit_gb: 32
+  memory_limit_gb: 28 # Reduced to leave headroom for memory profiling
   enable_gpu_memory_growth: true
   half_precision: true # Enable FP16 for RTX 4090
 

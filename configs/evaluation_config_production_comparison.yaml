@@ -48,7 +48,7 @@ models:
 evaluation:
   quick_test:
     enabled: true
-    num_clips: 50
+    num_clips: 75 # Increased for better validation signal
     models: ["yolov8_pose", "pytorch_pose", "mmpose"] # Quick validation with reliable models
   comprehensive_test:
     enabled: true
@@ -80,9 +80,10 @@ performance:
   max_workers: 8 # Full utilization for production
   batch_size: 1
   device: "auto" # Auto-detect: CUDA first, then MPS/CPU
-  memory_limit_gb: 32
+  memory_limit_gb: 30 # Reduced slightly for memory profiling headroom
   enable_gpu_memory_growth: true
-  half_precision: true # Enable FP16 for RTX 4090
+  half_precision: true # Enable FP16 for faster comparison
+  enable_memory_profiling: true # Enable our new memory profiling
 
 # Minimal configuration for direct usage with evaluate_pose_models.py
 # (RunManager will override these with proper paths when using run_production_evaluation.py)
