@@ -61,9 +61,10 @@ class MemoryProfiler:
     def __init__(
         self,
         enable_tracemalloc: bool = True,
-        monitoring_interval: float = 1.0,
+        monitoring_interval: float = 2.0,
         enable_continuous_monitoring: bool = True,
         save_snapshots: bool = True,
+        mlflow_buffer_size: int = 100,
     ):
         """
         Initialize memory profiler
@@ -73,11 +74,13 @@ class MemoryProfiler:
             monitoring_interval: Interval in seconds for continuous monitoring
             enable_continuous_monitoring: Whether to run background monitoring
             save_snapshots: Whether to save detailed snapshots to disk
+            mlflow_buffer_size: Number of recent snapshots to buffer for retroactive MLflow logging
         """
         self.enable_tracemalloc = enable_tracemalloc
         self.monitoring_interval = monitoring_interval
         self.enable_continuous_monitoring = enable_continuous_monitoring
         self.save_snapshots = save_snapshots
+        self.mlflow_buffer_size = mlflow_buffer_size
 
         # Tracking variables
         self.start_time = None
@@ -85,6 +88,16 @@ class MemoryProfiler:
         self.snapshots: List[MemorySnapshot] = []
         self.monitoring_thread = None
         self.stop_monitoring = threading.Event()
+
+        # MLflow state tracking
+        self.current_experiment_id = None
+        self.current_run_id = None
+        self.mlflow_buffer: List[MemorySnapshot] = (
+            []
+        )  # Recent snapshots for retroactive logging
+        self.logged_snapshots = (
+            set()
+        )  # Track which snapshots have been logged to avoid duplicates
 
         # GPU availability check
         self.gpu_available = torch.cuda.is_available()
@@ -133,13 +146,21 @@ class MemoryProfiler:
         self._log_snapshot_to_mlflow(initial_snapshot, "start")
 
     def _continuous_monitoring(self):
-        """Background thread for continuous memory monitoring"""
+        """Background thread for continuous memory monitoring with dynamic MLflow integration"""
         while not self.stop_monitoring.wait(self.monitoring_interval):
             try:
                 snapshot = self._take_snapshot()
                 self.snapshots.append(snapshot)
 
-                # Log to MLflow with timestamp
+                # Maintain rolling buffer for retroactive MLflow logging
+                self.mlflow_buffer.append(snapshot)
+                if len(self.mlflow_buffer) > self.mlflow_buffer_size:
+                    self.mlflow_buffer.pop(0)
+
+                # Check for MLflow experiment state changes
+                self._check_mlflow_state_change()
+
+                # Try to log to MLflow (will handle experiment detection internally)
                 self._log_snapshot_to_mlflow(snapshot, "continuous")
 
                 # Save snapshot to disk if enabled
@@ -148,6 +169,67 @@ class MemoryProfiler:
 
             except Exception as e:
                 logger.error(f"Error in continuous monitoring: {e}")
+
+    def _check_mlflow_state_change(self):
+        """Check if MLflow experiment state has changed and handle transitions"""
+        try:
+            active_run = mlflow.active_run()
+
+            if active_run is None:
+                # No active run - reset state if we were tracking one
+                if self.current_run_id is not None:
+                    logger.debug(f"MLflow run ended: {self.current_run_id}")
+                    self.current_experiment_id = None
+                    self.current_run_id = None
+                return
+
+            current_run_id = active_run.info.run_id
+            current_experiment_id = active_run.info.experiment_id
+
+            # Check if we've switched to a new run
+            if current_run_id != self.current_run_id:
+                logger.info(
+                    f"🔄 New MLflow run detected: {current_run_id} (experiment: {current_experiment_id})"
+                )
+
+                # Retroactively log recent buffer data to the new run
+                if self.mlflow_buffer:
+                    self._retroactive_log_buffer()
+
+                # Update state
+                self.current_run_id = current_run_id
+                self.current_experiment_id = current_experiment_id
+
+        except Exception as e:
+            logger.debug(f"Error checking MLflow state: {e}")
+
+    def _retroactive_log_buffer(self):
+        """Retroactively log buffered snapshots to the newly active MLflow run"""
+        if not self.mlflow_buffer:
+            return
+
+        try:
+            active_run = mlflow.active_run()
+            if active_run is None:
+                return
+
+            logger.info(
+                f"📊 Retroactively logging {len(self.mlflow_buffer)} buffered snapshots to MLflow"
+            )
+
+            # Log all buffered snapshots
+            for snapshot in self.mlflow_buffer:
+                snapshot_id = f"{snapshot.timestamp}_{snapshot.elapsed_time}"
+
+                # Skip if already logged to avoid duplicates
+                if snapshot_id in self.logged_snapshots:
+                    continue
+
+                self._log_snapshot_to_mlflow_direct(snapshot, "retroactive")
+                self.logged_snapshots.add(snapshot_id)
+
+        except Exception as e:
+            logger.error(f"Error in retroactive logging: {e}")
 
     def _take_snapshot(self) -> MemorySnapshot:
         """Take a comprehensive memory snapshot"""
@@ -219,6 +301,11 @@ class MemoryProfiler:
     def _log_snapshot_to_mlflow(self, snapshot: MemorySnapshot, phase: str):
         """Log snapshot metrics to MLflow with timestamp - only if experiment is active"""
         try:
+            # Check for duplicate logging
+            snapshot_id = f"{snapshot.timestamp}_{snapshot.elapsed_time}"
+            if snapshot_id in self.logged_snapshots:
+                return  # Already logged this snapshot
+
             # Check if MLflow has an active run
             active_run = mlflow.active_run()
             if active_run is None:
@@ -317,10 +404,100 @@ class MemoryProfiler:
                     step=int(snapshot.elapsed_time),
                 )
 
+            # Mark as successfully logged
+            self.logged_snapshots.add(snapshot_id)
+
         except Exception as e:
             logger.debug(
                 f"Failed to log metrics to MLflow (this is normal during startup): {e}"
             )
+
+    def _log_snapshot_to_mlflow_direct(self, snapshot: MemorySnapshot, phase: str):
+        """Direct MLflow logging for retroactive data - assumes active run exists"""
+        try:
+            # Mark this snapshot as logged to prevent duplicates
+            snapshot_id = f"{snapshot.timestamp}_{snapshot.elapsed_time}"
+
+            # System metrics
+            mlflow.log_metric(
+                "memory_system_percent",
+                snapshot.system_memory_percent,
+                step=int(snapshot.elapsed_time),
+            )
+            mlflow.log_metric(
+                "memory_system_available_gb",
+                snapshot.system_memory_available_gb,
+                step=int(snapshot.elapsed_time),
+            )
+            mlflow.log_metric(
+                "memory_system_used_gb",
+                snapshot.system_memory_used_gb,
+                step=int(snapshot.elapsed_time),
+            )
+
+            # Process metrics
+            mlflow.log_metric(
+                "memory_process_rss_mb",
+                snapshot.process_memory_rss_mb,
+                step=int(snapshot.elapsed_time),
+            )
+            mlflow.log_metric(
+                "memory_process_vms_mb",
+                snapshot.process_memory_vms_mb,
+                step=int(snapshot.elapsed_time),
+            )
+            mlflow.log_metric(
+                "memory_process_percent",
+                snapshot.process_memory_percent,
+                step=int(snapshot.elapsed_time),
+            )
+
+            # CPU metrics
+            mlflow.log_metric(
+                "cpu_percent", snapshot.cpu_percent, step=int(snapshot.elapsed_time)
+            )
+
+            # GPU metrics (if available)
+            if snapshot.gpu_available:
+                mlflow.log_metric(
+                    "gpu_allocated_mb",
+                    snapshot.gpu_allocated_mb,
+                    step=int(snapshot.elapsed_time),
+                )
+                mlflow.log_metric(
+                    "gpu_reserved_mb",
+                    snapshot.gpu_reserved_mb,
+                    step=int(snapshot.elapsed_time),
+                )
+                mlflow.log_metric(
+                    "gpu_max_allocated_mb",
+                    snapshot.gpu_max_allocated_mb,
+                    step=int(snapshot.elapsed_time),
+                )
+                mlflow.log_metric(
+                    "gpu_utilization_percent",
+                    snapshot.gpu_utilization_percent,
+                    step=int(snapshot.elapsed_time),
+                )
+
+            # Tracemalloc metrics (if enabled)
+            if self.enable_tracemalloc:
+                mlflow.log_metric(
+                    "tracemalloc_current_mb",
+                    snapshot.tracemalloc_current_mb,
+                    step=int(snapshot.elapsed_time),
+                )
+                mlflow.log_metric(
+                    "tracemalloc_peak_mb",
+                    snapshot.tracemalloc_peak_mb,
+                    step=int(snapshot.elapsed_time),
+                )
+
+            # Mark as successfully logged
+            self.logged_snapshots.add(snapshot_id)
+
+        except Exception as e:
+            logger.debug(f"Failed to log metrics directly to MLflow: {e}")
 
     def _save_snapshot_to_disk(self, snapshot: MemorySnapshot):
         """Save snapshot to disk for detailed analysis"""
