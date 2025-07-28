@@ -40,7 +40,9 @@ class OptunaPoseOptimizer:
             },
         )
 
-    def optimize_model(self, model_name: str, maneuvers: List) -> Dict:
+    def optimize_model(
+        self, model_name: str, maneuvers: List, memory_profiler=None
+    ) -> Dict:
         """Run Optuna optimization for a single model with intelligent early stopping"""
         logging.info(f"Starting Optuna optimization for {model_name}")
 
@@ -68,6 +70,10 @@ class OptunaPoseOptimizer:
 
             # Start MLflow run for this trial
             with mlflow.start_run(run_name=run_name):
+                # Signal memory profiler that MLflow run started
+                if memory_profiler:
+                    memory_profiler.on_mlflow_run_start()
+
                 # Log trial information
                 self._log_trial_info(trial, model_name, config, maneuvers)
 
@@ -140,6 +146,10 @@ class OptunaPoseOptimizer:
                 ):
                     print(f"   🛑 Early stopping triggered after {trial.number} trials")
                     raise optuna.exceptions.OptunaError("Early stopping triggered")
+
+                # Signal memory profiler that MLflow run is ending
+                if memory_profiler:
+                    memory_profiler.on_mlflow_run_end()
 
                 return trial_score
 

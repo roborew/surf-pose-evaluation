@@ -99,6 +99,12 @@ class MemoryProfiler:
             set()
         )  # Track which snapshots have been logged to avoid duplicates
 
+        # Event-driven MLflow integration
+        self.mlflow_run_active = False
+        self.force_log_next = (
+            threading.Event()
+        )  # Signal to force logging on next snapshot
+
         # GPU availability check
         self.gpu_available = torch.cuda.is_available()
         if self.gpu_available:
@@ -146,7 +152,7 @@ class MemoryProfiler:
         self._log_snapshot_to_mlflow(initial_snapshot, "start")
 
     def _continuous_monitoring(self):
-        """Background thread for continuous memory monitoring with dynamic MLflow integration"""
+        """Background thread for continuous memory monitoring with event-driven MLflow integration"""
         while not self.stop_monitoring.wait(self.monitoring_interval):
             try:
                 snapshot = self._take_snapshot()
@@ -157,11 +163,27 @@ class MemoryProfiler:
                 if len(self.mlflow_buffer) > self.mlflow_buffer_size:
                     self.mlflow_buffer.pop(0)
 
-                # Check for MLflow experiment state changes
-                self._check_mlflow_state_change()
+                # Event-driven MLflow logging
+                should_log_to_mlflow = False
 
-                # Try to log to MLflow (will handle experiment detection internally)
-                self._log_snapshot_to_mlflow(snapshot, "continuous")
+                # Force log if signaled
+                if self.force_log_next.is_set():
+                    should_log_to_mlflow = True
+                    self.force_log_next.clear()
+                    logger.debug("🎯 Force logging triggered")
+
+                # Log if MLflow run is explicitly active
+                elif self.mlflow_run_active and mlflow.active_run():
+                    should_log_to_mlflow = True
+
+                # Fallback: Check for MLflow state changes (less frequent)
+                elif not self.mlflow_run_active:
+                    self._check_mlflow_state_change()
+                    should_log_to_mlflow = mlflow.active_run() is not None
+
+                # Log to MLflow if conditions are met
+                if should_log_to_mlflow:
+                    self._log_snapshot_to_mlflow(snapshot, "continuous")
 
                 # Save snapshot to disk if enabled
                 if self.save_snapshots and self.run_dir:
@@ -688,3 +710,84 @@ class MemoryProfiler:
         )
 
         return final_stats
+
+    # Event-driven MLflow integration methods
+
+    def on_mlflow_run_start(self, run_id: str = None, experiment_name: str = None):
+        """Signal that an MLflow run has started - triggers immediate logging"""
+        try:
+            active_run = mlflow.active_run()
+            if active_run:
+                self.current_run_id = active_run.info.run_id
+                self.current_experiment_id = active_run.info.experiment_id
+                self.mlflow_run_active = True
+
+                logger.info(
+                    f"🔄 MLflow run started: {self.current_run_id} - Enabling real-time memory logging"
+                )
+
+                # Immediately log recent buffer data to the new run
+                if self.mlflow_buffer:
+                    self._retroactive_log_buffer()
+
+                # Force logging on next snapshot
+                self.force_log_next.set()
+
+            else:
+                logger.warning(
+                    "on_mlflow_run_start called but no active MLflow run detected"
+                )
+
+        except Exception as e:
+            logger.error(f"Error in on_mlflow_run_start: {e}")
+
+    def on_mlflow_run_end(self):
+        """Signal that an MLflow run has ended"""
+        try:
+            if self.mlflow_run_active:
+                logger.info(
+                    f"🔚 MLflow run ended: {self.current_run_id} - Stopping real-time logging"
+                )
+
+                # Take a final snapshot and log it
+                if self.current_run_id:
+                    final_snapshot = self._take_snapshot()
+                    self.snapshots.append(final_snapshot)
+                    # Don't log the final snapshot to MLflow as the run is ending
+
+                self.mlflow_run_active = False
+                self.current_run_id = None
+                self.current_experiment_id = None
+
+        except Exception as e:
+            logger.error(f"Error in on_mlflow_run_end: {e}")
+
+    def force_log_current_state(self):
+        """Force immediate logging of current memory state to active MLflow run"""
+        try:
+            active_run = mlflow.active_run()
+            if active_run:
+                snapshot = self._take_snapshot()
+                self.snapshots.append(snapshot)
+                self._log_snapshot_to_mlflow(snapshot, "forced")
+                logger.debug(
+                    f"💾 Forced memory logging to run: {active_run.info.run_id}"
+                )
+            else:
+                logger.debug("force_log_current_state called but no active MLflow run")
+
+        except Exception as e:
+            logger.error(f"Error in force_log_current_state: {e}")
+
+    def flush_buffer_to_mlflow(self):
+        """Flush all buffered data to the current active MLflow run"""
+        try:
+            active_run = mlflow.active_run()
+            if active_run and self.mlflow_buffer:
+                logger.info(
+                    f"🚀 Flushing {len(self.mlflow_buffer)} buffered snapshots to MLflow run: {active_run.info.run_id}"
+                )
+                self._retroactive_log_buffer()
+
+        except Exception as e:
+            logger.error(f"Error in flush_buffer_to_mlflow: {e}")

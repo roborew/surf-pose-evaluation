@@ -884,6 +884,7 @@ class PoseEvaluator:
         coco_annotations_path: str,
         coco_images_path: Optional[str] = None,
         max_images: int = 50,
+        memory_profiler=None,
     ) -> Dict[str, Dict[str, float]]:
         """Run COCO validation phase for multiple models
 
@@ -907,6 +908,10 @@ class PoseEvaluator:
             # Start MLflow run for COCO evaluation
             run_name = f"{model_name}_coco_validation"
             with mlflow.start_run(run_name=run_name):
+                # Signal memory profiler that MLflow run started
+                if memory_profiler:
+                    memory_profiler.on_mlflow_run_start()
+
                 # Log run parameters
                 mlflow.log_param("model_name", model_name)
                 mlflow.log_param("phase", "coco_validation")
@@ -932,6 +937,10 @@ class PoseEvaluator:
                 else:
                     logger.error(f"❌ COCO validation failed for {model_name}")
                     results[model_name] = {}
+
+                # Signal memory profiler that MLflow run is ending
+                if memory_profiler:
+                    memory_profiler.on_mlflow_run_end()
 
         logger.info(f"🎯 COCO validation phase completed for {len(results)} models")
         return results

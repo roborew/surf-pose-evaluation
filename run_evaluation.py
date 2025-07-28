@@ -297,7 +297,9 @@ def validate_parameters(args) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
-def run_optuna_phase(run_manager: RunManager, args, optuna_maneuvers: List) -> Dict:
+def run_optuna_phase(
+    run_manager: RunManager, args, optuna_maneuvers: List, memory_profiler=None
+) -> Dict:
     """Run Optuna optimization phase with pre-selected data and dynamic time allocation"""
     logger = logging.getLogger(__name__)
 
@@ -359,7 +361,9 @@ def run_optuna_phase(run_manager: RunManager, args, optuna_maneuvers: List) -> D
 
         # Run optimization
         start_time = time.time()
-        model_result = optimizer.optimize_model(model_name, optuna_maneuvers)
+        model_result = optimizer.optimize_model(
+            model_name, optuna_maneuvers, memory_profiler
+        )
         end_time = time.time()
 
         # Track results for dynamic allocation
@@ -407,7 +411,7 @@ def run_optuna_phase(run_manager: RunManager, args, optuna_maneuvers: List) -> D
 
 
 def run_coco_validation_phase(
-    run_manager: RunManager, args, coco_annotations_path: str
+    run_manager: RunManager, args, coco_annotations_path: str, memory_profiler=None
 ) -> Dict:
     """Run COCO validation phase for ground truth PCK scores using optimized parameters"""
     logger = logging.getLogger(__name__)
@@ -509,6 +513,7 @@ def run_coco_validation_phase(
         coco_annotations_path=coco_annotations_path,
         coco_images_path=None,  # Will download images as needed
         max_images=args.coco_images,  # Configurable via --coco-images (default: 100)
+        memory_profiler=memory_profiler,
     )
 
     logger.info("✅ COCO validation phase completed successfully")
@@ -520,6 +525,7 @@ def run_comparison_phase(
     args,
     comparison_maneuvers: List,
     visualization_manifest_path: str,
+    memory_profiler=None,
 ) -> Dict:
     """Run comprehensive comparison phase with pre-selected data"""
     logger = logging.getLogger(__name__)
@@ -633,6 +639,10 @@ def run_comparison_phase(
         # Start MLflow run for comparison
         run_name = f"{model_name}_comparison_eval"
         with mlflow.start_run(run_name=run_name):
+            # Signal memory profiler that MLflow run started
+            if memory_profiler:
+                memory_profiler.on_mlflow_run_start()
+
             # Log run info
             mlflow.log_param("model_name", model_name)
             mlflow.log_param("phase", "comparison")
@@ -654,6 +664,10 @@ def run_comparison_phase(
                         mlflow.log_metric(metric_name, value)
 
             results[model_name] = model_result
+
+            # Signal memory profiler that MLflow run is ending
+            if memory_profiler:
+                memory_profiler.on_mlflow_run_end()
 
     logger.info("✅ Comprehensive comparison completed successfully")
     return {"config_path": comparison_config_path, "results": results}
@@ -1428,7 +1442,7 @@ def main():
     # Initialize memory profiler
     memory_profiler = MemoryProfiler(
         enable_tracemalloc=True,
-        monitoring_interval=2.0,  # 2-second intervals for detailed tracking
+        monitoring_interval=2.0,  # Back to 2.0s - event-driven signaling handles timing
         enable_continuous_monitoring=True,
         save_snapshots=True,
     )
@@ -1503,7 +1517,9 @@ def main():
         if not args.skip_optuna and not args.comparison_only:
             memory_profiler.log_milestone("optuna_phase_start")
             if optuna_maneuvers:
-                optuna_result = run_optuna_phase(run_manager, args, optuna_maneuvers)
+                optuna_result = run_optuna_phase(
+                    run_manager, args, optuna_maneuvers, memory_profiler
+                )
                 results["optuna_phase"] = "completed"
                 results["configs_used"].append(optuna_result["config_path"])
                 results["optuna_results"] = optuna_result["results"]
@@ -1532,7 +1548,7 @@ def main():
                     )
 
                 coco_validation_result = run_coco_validation_phase(
-                    run_manager, args, coco_annotations_path
+                    run_manager, args, coco_annotations_path, memory_profiler
                 )
                 results["coco_validation_phase"] = "completed"
                 results["configs_used"].append(coco_validation_result["config_path"])
@@ -1560,6 +1576,7 @@ def main():
                     args,
                     comparison_maneuvers,
                     visualization_manifest_path,
+                    memory_profiler,
                 )
                 memory_profiler.log_milestone("individual_model_evaluations_completed")
 
