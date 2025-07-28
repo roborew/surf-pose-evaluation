@@ -340,6 +340,12 @@ TRIAL DETAILS:
                     if isinstance(value, (int, float)):
                         mlflow.log_metric(metric_name, value)
 
+            # Include best parameters in the result for save_best_parameters to use
+            if isinstance(result, dict):
+                result["best_config"] = best_config
+                result["best_trial_number"] = best_trial_result["trial_number"]
+                result["best_score"] = best_score
+
             return result
 
     def _log_best_evaluation_info(
@@ -386,12 +392,34 @@ USAGE RECOMMENDATIONS:
 
         best_params = {}
         for model_name, result in model_results.items():
-            if "error" not in result and hasattr(result, "get"):
-                # Extract parameters from result (this would need to be implemented based on result structure)
-                # For now, this is a placeholder
+            if "error" not in result and isinstance(result, dict):
+                # Extract actual best parameters from optimization result
+                if "best_config" in result:
+                    best_params[model_name] = result["best_config"]
+                    logging.info(
+                        f"Extracted best parameters for {model_name}: {result['best_config']}"
+                    )
+                else:
+                    logging.warning(
+                        f"No best_config found in result for {model_name}, optimization may have failed"
+                    )
+                    best_params[model_name] = {
+                        "error": "optimization_failed_no_best_config"
+                    }
+            else:
+                logging.warning(
+                    f"Skipping {model_name} - result contains error or invalid format"
+                )
                 best_params[model_name] = {
-                    "placeholder": "implement_parameter_extraction"
+                    "error": "optimization_failed_or_invalid_result"
                 }
+
+        if not any(
+            isinstance(params, dict) and "error" not in params
+            for params in best_params.values()
+        ):
+            logging.error("No valid optimized parameters found for any model!")
+            return False
 
         try:
             best_params_file = self.run_manager.best_params_dir / "best_parameters.yaml"
@@ -399,6 +427,27 @@ USAGE RECOMMENDATIONS:
                 yaml.dump(best_params, f, default_flow_style=False)
 
             logging.info(f"Saved best parameters to {best_params_file}")
+
+            # Log summary of what was saved
+            valid_models = [
+                name
+                for name, params in best_params.items()
+                if isinstance(params, dict) and "error" not in params
+            ]
+            failed_models = [
+                name
+                for name, params in best_params.items()
+                if isinstance(params, dict) and "error" in params
+            ]
+
+            logging.info(
+                f"✅ Saved optimized parameters for {len(valid_models)} models: {valid_models}"
+            )
+            if failed_models:
+                logging.warning(
+                    f"⚠️ Failed to get parameters for {len(failed_models)} models: {failed_models}"
+                )
+
             return True
 
         except Exception as e:

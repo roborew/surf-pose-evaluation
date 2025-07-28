@@ -253,10 +253,38 @@ class PoseEvaluator:
                 all_best_params = yaml.safe_load(f)
 
             model_params = all_best_params.get(model_name, {})
+
+            # Check if parameters contain error or placeholder values
+            if isinstance(model_params, dict):
+                if "error" in model_params:
+                    error_msg = (
+                        f"Optimization failed for {model_name}: {model_params['error']}"
+                    )
+                    if load_config.get("fallback_to_defaults", True):
+                        logging.warning(f"{error_msg}, using defaults")
+                        return {}
+                    else:
+                        raise ValueError(error_msg)
+
+                if "placeholder" in model_params:
+                    error_msg = f"Only placeholder parameters found for {model_name} - optimization results not properly saved"
+                    if load_config.get("fallback_to_defaults", True):
+                        logging.warning(f"{error_msg}, using defaults")
+                        return {}
+                    else:
+                        raise ValueError(error_msg)
+
             if model_params:
                 logging.info(f"Loaded best parameters for {model_name}: {model_params}")
             else:
-                logging.warning(f"No best parameters found for {model_name}")
+                if load_config.get("fallback_to_defaults", True):
+                    logging.warning(
+                        f"No best parameters found for {model_name}, using defaults"
+                    )
+                else:
+                    raise ValueError(
+                        f"No optimized parameters found for {model_name} and fallback_to_defaults is disabled"
+                    )
 
             return model_params
 

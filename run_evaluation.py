@@ -424,29 +424,60 @@ def run_coco_validation_phase(
     with open(coco_config_path, "r") as f:
         config = yaml.safe_load(f)
 
-    # Configure best parameters loading for COCO validation (if available)
+    # Configure best parameters loading for COCO validation - REQUIRE optimized parameters
     if "models" not in config:
         config["models"] = {}
 
-    # Check if best parameters exist
+    # Check if best parameters exist and are valid
     best_params_file = run_manager.best_params_dir / "best_parameters.yaml"
     if best_params_file.exists():
-        config["models"]["load_best_params"] = {
-            "enabled": True,
-            "source_path": str(run_manager.best_params_dir),
-            "fallback_to_defaults": True,
-        }
-        logger.info(
-            f"✅ Configured COCO validation to use optimized parameters from {run_manager.best_params_dir}"
-        )
+        # Check if the parameters file contains actual optimized parameters
+        try:
+            with open(best_params_file, "r") as f:
+                best_params = yaml.safe_load(f)
+
+            # Check if we have valid parameters (not just placeholders or errors)
+            valid_params = {}
+            for model_name, params in best_params.items():
+                if (
+                    isinstance(params, dict)
+                    and "error" not in params
+                    and "placeholder" not in params
+                ):
+                    valid_params[model_name] = params
+
+            if valid_params:
+                config["models"]["load_best_params"] = {
+                    "enabled": True,
+                    "source_path": str(run_manager.best_params_dir),
+                    "fallback_to_defaults": False,  # FAIL EARLY if parameters missing
+                }
+                logger.info(
+                    f"✅ Configured COCO validation to use optimized parameters for models: {list(valid_params.keys())}"
+                )
+            else:
+                logger.error(
+                    "❌ Best parameters file exists but contains no valid optimized parameters!"
+                )
+                logger.error(
+                    "COCO validation requires optimized parameters - stopping to prevent false positives."
+                )
+                return {
+                    "error": "No valid optimized parameters available for COCO validation"
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Failed to validate best parameters file: {e}")
+            logger.error(
+                "COCO validation requires optimized parameters - stopping to prevent false positives."
+            )
+            return {"error": f"Failed to validate best parameters: {e}"}
     else:
-        config["models"]["load_best_params"] = {
-            "enabled": False,
-            "fallback_to_defaults": True,
-        }
-        logger.info(
-            "⚠️ No optimized parameters found, COCO validation will use default parameters"
+        logger.error("❌ No optimized parameters found!")
+        logger.error(
+            "COCO validation requires optimized parameters - stopping to prevent false positives."
         )
+        return {"error": "No optimized parameters file found for COCO validation"}
 
     # Save updated config
     with open(coco_config_path, "w") as f:
@@ -504,6 +535,65 @@ def run_comparison_phase(
     # Load config
     with open(comparison_config_path, "r") as f:
         config = yaml.safe_load(f)
+
+    # Configure best parameters loading for comparison phase - REQUIRE optimized parameters
+    if "models" not in config:
+        config["models"] = {}
+
+    # Check if best parameters exist and are valid
+    best_params_file = run_manager.best_params_dir / "best_parameters.yaml"
+    if best_params_file.exists():
+        # Check if the parameters file contains actual optimized parameters
+        try:
+            with open(best_params_file, "r") as f:
+                best_params = yaml.safe_load(f)
+
+            # Check if we have valid parameters (not just placeholders or errors)
+            valid_params = {}
+            for model_name, params in best_params.items():
+                if (
+                    isinstance(params, dict)
+                    and "error" not in params
+                    and "placeholder" not in params
+                ):
+                    valid_params[model_name] = params
+
+            if valid_params:
+                config["models"]["load_best_params"] = {
+                    "enabled": True,
+                    "source_path": str(run_manager.best_params_dir),
+                    "fallback_to_defaults": False,  # FAIL EARLY if parameters missing
+                }
+                logger.info(
+                    f"✅ Configured comparison to use optimized parameters for models: {list(valid_params.keys())}"
+                )
+            else:
+                logger.error(
+                    "❌ Best parameters file exists but contains no valid optimized parameters!"
+                )
+                logger.error(
+                    "Comparison phase requires optimized parameters - stopping to prevent false positives."
+                )
+                return {
+                    "error": "No valid optimized parameters available for comparison phase"
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Failed to validate best parameters file: {e}")
+            logger.error(
+                "Comparison phase requires optimized parameters - stopping to prevent false positives."
+            )
+            return {"error": f"Failed to validate best parameters: {e}"}
+    else:
+        logger.error("❌ No optimized parameters found!")
+        logger.error(
+            "Comparison phase requires optimized parameters - stopping to prevent false positives."
+        )
+        return {"error": "No optimized parameters file found for comparison phase"}
+
+    # Save updated config
+    with open(comparison_config_path, "w") as f:
+        yaml.safe_dump(config, f)
 
     # Set MLflow experiment name from comparison config
     import mlflow
