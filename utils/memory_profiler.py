@@ -11,12 +11,20 @@ import time
 import mlflow
 import threading
 import json
+import warnings
+import os
 from typing import Dict, Any, Optional, List
 import logging
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import numpy as np
+
+# Suppress protobuf warnings
+warnings.filterwarnings(
+    "ignore", category=UserWarning, module="google.protobuf.symbol_database"
+)
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
 logger = logging.getLogger(__name__)
 
@@ -209,8 +217,31 @@ class MemoryProfiler:
         )
 
     def _log_snapshot_to_mlflow(self, snapshot: MemorySnapshot, phase: str):
-        """Log snapshot metrics to MLflow with timestamp"""
+        """Log snapshot metrics to MLflow with timestamp - only if experiment is active"""
         try:
+            # Check if MLflow has an active run
+            active_run = mlflow.active_run()
+            if active_run is None:
+                # No active run - skip logging but don't error
+                logger.debug(
+                    f"No active MLflow run - skipping memory metrics logging for phase: {phase}"
+                )
+                return
+
+            # Verify we have a valid experiment ID
+            try:
+                experiment_id = active_run.info.experiment_id
+                if experiment_id is None:
+                    logger.debug(
+                        f"No valid experiment ID - skipping memory metrics logging for phase: {phase}"
+                    )
+                    return
+            except Exception as exp_err:
+                logger.debug(
+                    f"Could not get experiment ID - skipping memory metrics logging: {exp_err}"
+                )
+                return
+
             # System metrics
             mlflow.log_metric(
                 "memory_system_percent",
@@ -287,7 +318,9 @@ class MemoryProfiler:
                 )
 
         except Exception as e:
-            logger.error(f"Failed to log metrics to MLflow: {e}")
+            logger.debug(
+                f"Failed to log metrics to MLflow (this is normal during startup): {e}"
+            )
 
     def _save_snapshot_to_disk(self, snapshot: MemorySnapshot):
         """Save snapshot to disk for detailed analysis"""
@@ -310,23 +343,32 @@ class MemoryProfiler:
         snapshot = self._take_snapshot()
         self.snapshots.append(snapshot)
 
-        # Log to MLflow with milestone tag
+        # Log to MLflow with milestone tag (if available)
         self._log_snapshot_to_mlflow(snapshot, f"milestone_{milestone_name}")
 
-        # Log milestone-specific metrics
+        # Log milestone-specific metrics (if MLflow is available)
         try:
-            mlflow.log_metric(
-                f"milestone_{milestone_name}_memory_mb", snapshot.process_memory_rss_mb
-            )
-            mlflow.log_metric(
-                f"milestone_{milestone_name}_cpu_percent", snapshot.cpu_percent
-            )
-            if snapshot.gpu_available:
-                mlflow.log_metric(
-                    f"milestone_{milestone_name}_gpu_mb", snapshot.gpu_allocated_mb
+            active_run = mlflow.active_run()
+            if active_run is None:
+                logger.debug(
+                    f"No active MLflow run - skipping milestone metrics for: {milestone_name}"
                 )
+            else:
+                mlflow.log_metric(
+                    f"milestone_{milestone_name}_memory_mb",
+                    snapshot.process_memory_rss_mb,
+                )
+                mlflow.log_metric(
+                    f"milestone_{milestone_name}_cpu_percent", snapshot.cpu_percent
+                )
+                if snapshot.gpu_available:
+                    mlflow.log_metric(
+                        f"milestone_{milestone_name}_gpu_mb", snapshot.gpu_allocated_mb
+                    )
         except Exception as e:
-            logger.error(f"Failed to log milestone metrics: {e}")
+            logger.debug(
+                f"Failed to log milestone metrics (normal during startup): {e}"
+            )
 
         logger.info(
             f"Milestone '{milestone_name}': Memory={snapshot.process_memory_rss_mb:.1f}MB, "

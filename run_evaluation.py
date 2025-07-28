@@ -1769,7 +1769,13 @@ def main():
             try:
                 import mlflow
 
-                if final_memory_stats and "statistics" in final_memory_stats:
+                # Check if MLflow has an active run
+                active_run = mlflow.active_run()
+                if active_run is None:
+                    logger.debug(
+                        "No active MLflow run - skipping final memory stats logging"
+                    )
+                elif final_memory_stats and "statistics" in final_memory_stats:
                     stats = final_memory_stats["statistics"]
                     mlflow.log_metric(
                         "final_memory_peak_mb", stats["process_memory"]["peak_mb"]
@@ -1798,7 +1804,9 @@ def main():
                             "potential_memory_leak", analysis["potential_memory_leak"]
                         )
             except Exception as e:
-                logger.error(f"Failed to log final memory stats to MLflow: {e}")
+                logger.debug(
+                    f"Failed to log final memory stats to MLflow (normal if no experiment active): {e}"
+                )
 
             logger.info(
                 f"📊 Memory profiling completed. Peak memory: {final_memory_stats['statistics']['process_memory']['peak_mb']:.1f}MB"
