@@ -101,6 +101,11 @@ def main():
         action="store_true",
         help="Show experiments summary before starting UI",
     )
+    parser.add_argument(
+        "--backend-store-uri",
+        type=str,
+        help="Manual override for MLflow backend store URI (e.g., file:///path/to/mlruns or http://mlflow-server:5000)",
+    )
 
     args = parser.parse_args()
 
@@ -113,7 +118,11 @@ def main():
         print()
 
     # Choose which experiment to view
-    if args.run_name:
+    if args.backend_store_uri:
+        # Use manually specified backend store URI
+        backend_store_uri = args.backend_store_uri
+        print(f"🎯 Using manual backend store URI: {backend_store_uri}")
+    elif args.run_name:
         # Use specified run name
         mlruns_path = (
             mlflow_manager.shared_results_dir / "runs" / args.run_name / "mlruns"
@@ -121,18 +130,22 @@ def main():
         if not mlruns_path.exists():
             print(f"❌ Run '{args.run_name}' not found or has no MLflow data")
             sys.exit(1)
+        backend_store_uri = f"file://{mlruns_path.absolute()}"
     else:
         # Let user choose
         mlruns_path = choose_experiment_run(mlflow_manager)
         if mlruns_path is None:
             print("ℹ️  Using consolidated view of all experiments")
             mlruns_path = mlflow_manager.shared_results_dir
+        backend_store_uri = f"file://{mlruns_path.absolute()}"
 
     # Start MLflow UI
     print(f"🚀 Starting MLflow UI...")
     print(f"📍 Host: {args.host}")
     print(f"🔌 Port: {args.port}")
-    print(f"📂 Data directory: {mlruns_path}")
+    print(f"📂 Backend Store URI: {backend_store_uri}")
+    if not args.backend_store_uri:
+        print(f"📁 Data directory: {mlruns_path}")
     print()
 
     try:
@@ -142,7 +155,7 @@ def main():
             "mlflow",
             "ui",
             "--backend-store-uri",
-            f"file://{mlruns_path.absolute()}",
+            backend_store_uri,
             "--host",
             args.host,
             "--port",
@@ -153,7 +166,10 @@ def main():
 
         process = subprocess.Popen(cmd)
         print(f"✅ MLflow UI running at: http://{args.host}:{args.port}")
-        print(f"🔍 Viewing experiment data from: {mlruns_path.name}")
+        if args.backend_store_uri:
+            print(f"🔍 Viewing data from: {backend_store_uri}")
+        else:
+            print(f"🔍 Viewing experiment data from: {mlruns_path.name}")
         print()
         print("Press Ctrl+C to stop the MLflow UI...")
 
