@@ -56,6 +56,20 @@ evaluation:
     models: ["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose", "mmpose"]
     use_best_params: true # Use parameters from enhanced Optuna phase
 
+  # Enhanced evaluation settings
+  cross_validation:
+    enabled: true
+    n_folds: 5 # 5-fold cross-validation for robust results
+    stratified: true # Maintain class balance across folds
+
+  # Statistical analysis settings
+  statistical_analysis:
+    enabled: true
+    confidence_level: 0.95 # 95% confidence intervals
+    significance_test: "wilcoxon" # Non-parametric test for model comparison
+    effect_size: "cohens_d" # Effect size calculation
+    multiple_comparison_correction: "bonferroni" # Correct for multiple comparisons
+
 # Optuna Configuration
 optuna:
   enabled: false # Disabled for comparison phase

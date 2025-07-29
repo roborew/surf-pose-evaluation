@@ -65,6 +65,13 @@ optuna:
   sampler: "TPESampler"
   pruner: "MedianPruner"
 
+  # Advanced sampling configuration
+  sampler_config:
+    n_startup_trials: 10 # Number of random trials before TPE
+    n_ei_candidates: 24 # Number of candidates to sample EI
+    multivariate: true # Enable multivariate TPE
+    group: true # Enable grouped sampling
+
   # Enhanced early stopping configuration
   early_stopping:
     enabled: true
@@ -72,6 +79,7 @@ optuna:
     min_trials: 30 # Minimum trials before early stopping
     improvement_threshold: 0.0005 # More sensitive improvement detection
     plateau_threshold: 0.98 # Consider plateaued if within 98% of best
+    n_warmup_steps: 10 # Warmup steps before pruning
 
   # Enhanced model-specific optimization settings
   model_settings:
@@ -86,6 +94,7 @@ optuna:
         static_image_mode: [true, false]
         enable_segmentation: [true, false]
         use_alignment_mode: [true, false]
+        refine_face_landmarks: [true, false] # Additional parameter
     yolov8_pose:
       expected_trials: 60 # Most promising model, more trials
       patience: 20
@@ -96,6 +105,8 @@ optuna:
         max_detections: [1, 1000]
         model_size: ["n", "s", "m", "l"] # Test all model sizes
         half_precision: [true, false]
+        agnostic_nms: [true, false] # Additional parameter
+        verbose: [true, false] # Additional parameter
     blazepose:
       expected_trials: 45
       patience: 18
@@ -107,6 +118,7 @@ optuna:
         static_image_mode: [true, false]
         enable_segmentation: [true, false]
         use_alignment_mode: [true, false]
+        refine_face_landmarks: [true, false] # Additional parameter
     mmpose:
       expected_trials: 70 # Complex model, extensive optimization
       patience: 25
@@ -117,6 +129,8 @@ optuna:
         max_persons: [1, 5]
         model_variant: ["lightweight", "medium", "heavy"]
         use_multi_scale: [true, false]
+        flip_test: [true, false] # Additional parameter
+        flip_pairs: [true, false] # Additional parameter
     pytorch_pose:
       expected_trials: 55
       patience: 20
@@ -127,6 +141,8 @@ optuna:
         box_nms_thresh: [0.1, 0.9]
         nms_threshold: [0.1, 0.9]
         max_detections: [1, 20]
+        use_fpn: [true, false] # Additional parameter
+        use_gn: [true, false] # Additional parameter
 
 # Performance Configuration (Production optimized)
 performance:
