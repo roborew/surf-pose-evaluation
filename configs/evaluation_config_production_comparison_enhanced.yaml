@@ -1,0 +1,122 @@
+# Production Model Comparison Configuration
+# Note: Output paths (mlflow, predictions, visualizations, best_params) are automatically
+# managed by RunManager when using run_production_evaluation.py. They are organized in
+# timestamped folders under results/runs/{timestamp}_{name}/.
+
+# Data Source Configuration - Production paths with FFV1 format
+data_source:
+  base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
+  video_clips:
+    h264_path: "03_CLIPPED/h264"
+    ffv1_path: "03_CLIPPED/ffv1"
+    input_format: "ffv1" # Production uses ffv1 format
+  annotations:
+    labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
+    maneuver_annotations_file: "maneuver_annotations.json"
+    sony_300_labels: "sony_300"
+    sony_70_labels: "sony_70"
+  splits:
+    train_file: "05_ANALYSED_DATA/POSE/splits/train_split.json"
+    val_file: "05_ANALYSED_DATA/POSE/splits/val_split.json"
+    test_file: "05_ANALYSED_DATA/POSE/splits/test_split.json"
+    train_ratio: 0.70
+    val_ratio: 0.15
+    test_ratio: 0.15
+    random_seed: 42
+    zoom_handling:
+      enabled: true
+      balanced_distribution: true
+      force_no_zoom_in_val: true
+  camera_selection:
+    enabled_cameras: ["SONY_300", "SONY_70"] # Production uses both cameras
+    max_clips_per_session: 300 # Significantly increased for comprehensive comparison
+
+# Model Configuration
+models:
+  mediapipe:
+    config_path: "configs/model_configs/mediapipe.yaml"
+  blazepose:
+    config_path: "configs/model_configs/blazepose.yaml"
+  yolov8_pose:
+    config_path: "configs/model_configs/yolov8_pose.yaml"
+  pytorch_pose:
+    config_path: "configs/model_configs/pytorch_pose.yaml"
+  mmpose:
+    config_path: "configs/model_configs/mmpose.yaml"
+
+# Enhanced Evaluation Configuration
+evaluation:
+  quick_test:
+    enabled: true
+    num_clips: 150 # Significantly increased for better validation signal
+    models: ["yolov8_pose", "pytorch_pose", "mmpose"] # Quick validation with reliable models
+  comprehensive_test:
+    enabled: true
+    num_clips: 500 # Full dataset for comprehensive comparison
+    models: ["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose", "mmpose"]
+    use_best_params: true # Use parameters from enhanced Optuna phase
+
+# Optuna Configuration
+optuna:
+  enabled: false # Disabled for comparison phase
+
+# Enhanced Predictions Configuration
+predictions:
+  enabled: true
+  save_detailed_predictions: true
+  include_confidence_scores: true
+  include_bounding_boxes: true
+  save_keypoint_sequences: true # New: Save temporal keypoint data
+  save_pose_trajectories: true # New: Save pose movement patterns
+
+# Enhanced Visualizations Configuration
+visualizations:
+  enabled: true
+  save_overlay_videos: true
+  save_keypoint_plots: true
+  save_comparison_plots: true
+  save_performance_analysis: true # New: Performance breakdown plots
+  save_accuracy_heatmaps: true # New: Accuracy across different conditions
+  save_memory_profiles: true # New: Memory usage over time
+  save_speed_analysis: true # New: Speed vs accuracy trade-offs
+  max_examples_per_model: 25 # Increased for comprehensive visualizations
+  video_quality: "high" # New: High-quality video output
+  include_confidence_visualization: true # New: Show confidence levels
+  include_error_analysis: true # New: Highlight detection errors
+
+# Enhanced Performance Configuration
+performance:
+  max_workers: 8 # Full utilization for production
+  batch_size: 1
+  device: "auto" # Auto-detect: CUDA first, then MPS/CPU
+  memory_limit_gb: 30 # Optimized for comprehensive analysis
+  enable_gpu_memory_growth: true
+  half_precision: true # Enable FP16 for faster comparison
+  enable_memory_profiling: true # Enable our new memory profiling
+  enable_detailed_timing: true # New: Detailed timing analysis
+  enable_throughput_analysis: true # New: Throughput vs batch size analysis
+
+# Enhanced MLflow Configuration
+mlflow:
+  enabled: true
+  experiment_name: "surf_pose_production_comparison_enhanced"
+  log_artifacts: true
+  log_metrics: true
+  log_parameters: true
+
+# Enhanced Output Configuration
+output:
+  predictions:
+    enabled: true
+    format: "json" # Structured prediction output
+    include_metadata: true # Include model and run metadata
+  visualization:
+    enabled: true
+    format: ["png", "mp4"] # Multiple output formats
+    resolution: "high" # High-resolution outputs
+  reports:
+    enabled: true
+    generate_html_report: true # New: Interactive HTML report
+    generate_pdf_summary: true # New: PDF summary report
+    include_statistical_analysis: true # New: Statistical significance tests
+    include_recommendations: true # New: Model recommendations based on use case

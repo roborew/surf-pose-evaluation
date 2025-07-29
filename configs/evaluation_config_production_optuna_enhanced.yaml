@@ -1,0 +1,195 @@
+# Production Optuna Hyperparameter Optimization Configuration
+# Note: Output paths (mlflow, predictions, visualizations, best_params) are automatically
+# managed by RunManager when using run_production_evaluation.py. They are organized in
+# timestamped folders under results/runs/{timestamp}_{name}/.
+
+# Data Source Configuration - Production paths with FFV1 format
+data_source:
+  base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
+  video_clips:
+    h264_path: "03_CLIPPED/h264"
+    ffv1_path: "03_CLIPPED/ffv1"
+    input_format: "ffv1" # Production uses ffv1 format
+  annotations:
+    labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
+    maneuver_annotations_file: "maneuver_annotations.json"
+    sony_300_labels: "sony_300"
+    sony_70_labels: "sony_70"
+  splits:
+    train_file: "05_ANALYSED_DATA/POSE/splits/train_split.json"
+    val_file: "05_ANALYSED_DATA/POSE/splits/val_split.json"
+    test_file: "05_ANALYSED_DATA/POSE/splits/test_split.json"
+    train_ratio: 0.70
+    val_ratio: 0.15
+    test_ratio: 0.15
+    random_seed: 42
+    zoom_handling:
+      enabled: true
+      balanced_distribution: true
+      force_no_zoom_in_val: true
+  camera_selection:
+    enabled_cameras: ["SONY_300", "SONY_70"] # Use both cameras for comprehensive optimization
+    max_clips_per_session: 100 # Increased for better optimization signal
+
+# Model Configuration
+models:
+  mediapipe:
+    config_path: "configs/model_configs/mediapipe.yaml"
+  blazepose:
+    config_path: "configs/model_configs/blazepose.yaml"
+  yolov8_pose:
+    config_path: "configs/model_configs/yolov8_pose.yaml"
+  pytorch_pose:
+    config_path: "configs/model_configs/pytorch_pose.yaml"
+  mmpose:
+    config_path: "configs/model_configs/mmpose.yaml"
+
+# Evaluation Configuration
+evaluation:
+  quick_test:
+    enabled: true
+    num_clips: 50 # Increased for better optimization signal
+    models: ["yolov8_pose", "pytorch_pose", "mmpose"] # Fast models for quick validation
+  comprehensive_test:
+    enabled: true
+    num_clips: 150 # Significantly increased for robust optimization
+    models: ["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose", "mmpose"]
+
+# Enhanced Optuna Optimization
+optuna:
+  enabled: true
+  study_name: "surf_pose_optimization_production_enhanced"
+  direction: "maximize" # Maximize PCK accuracy
+  n_trials: 500 # Significantly increased for thorough optimization
+  timeout_minutes: 600 # 10 hours max per model for comprehensive search
+  sampler: "TPESampler"
+  pruner: "MedianPruner"
+
+  # Enhanced early stopping configuration
+  early_stopping:
+    enabled: true
+    patience: 25 # Increased patience for better convergence
+    min_trials: 30 # Minimum trials before early stopping
+    improvement_threshold: 0.0005 # More sensitive improvement detection
+    plateau_threshold: 0.98 # Consider plateaued if within 98% of best
+
+  # Enhanced model-specific optimization settings
+  model_settings:
+    mediapipe:
+      expected_trials: 50 # Increased for better optimization
+      patience: 15
+      parameter_ranges:
+        min_detection_confidence: [0.1, 0.9]
+        min_tracking_confidence: [0.1, 0.9]
+        model_complexity: [0, 2] # Include all complexity levels
+        smooth_landmarks: [true, false]
+        static_image_mode: [true, false]
+        enable_segmentation: [true, false]
+        use_alignment_mode: [true, false]
+    yolov8_pose:
+      expected_trials: 60 # Most promising model, more trials
+      patience: 20
+      parameter_ranges:
+        confidence_threshold: [0.1, 0.9]
+        iou_threshold: [0.1, 0.9]
+        keypoint_threshold: [0.05, 0.5]
+        max_detections: [1, 1000]
+        model_size: ["n", "s", "m", "l"] # Test all model sizes
+        half_precision: [true, false]
+    blazepose:
+      expected_trials: 45
+      patience: 18
+      parameter_ranges:
+        min_detection_confidence: [0.1, 0.9]
+        min_tracking_confidence: [0.1, 0.9]
+        model_complexity: [0, 2]
+        smooth_landmarks: [true, false]
+        static_image_mode: [true, false]
+        enable_segmentation: [true, false]
+        use_alignment_mode: [true, false]
+    mmpose:
+      expected_trials: 70 # Complex model, extensive optimization
+      patience: 25
+      parameter_ranges:
+        detection_threshold: [0.1, 0.9]
+        pose_threshold: [0.1, 0.9]
+        nms_threshold: [0.1, 0.9]
+        max_persons: [1, 5]
+        model_variant: ["lightweight", "medium", "heavy"]
+        use_multi_scale: [true, false]
+    pytorch_pose:
+      expected_trials: 55
+      patience: 20
+      parameter_ranges:
+        confidence_threshold: [0.1, 0.9]
+        keypoint_threshold: [0.1, 0.9]
+        box_score_thresh: [0.1, 0.9]
+        box_nms_thresh: [0.1, 0.9]
+        nms_threshold: [0.1, 0.9]
+        max_detections: [1, 20]
+
+# Performance Configuration (Production optimized)
+performance:
+  max_workers: 8 # Full utilization for production
+  batch_size: 1
+  device: "auto" # Auto-detect: CUDA first, then MPS/CPU
+  memory_limit_gb: 28 # Reduced to leave headroom for memory profiling
+  enable_gpu_memory_growth: true
+  half_precision: true # Enable FP16 for RTX 4090
+
+# Minimal configuration for direct usage with evaluate_pose_models.py
+# (RunManager will override these with proper paths when using run_production_evaluation.py)
+mlflow:
+  enabled: true
+  experiment_name: "surf_pose_production_optuna_enhanced"
+
+output:
+  predictions:
+    enabled: false # DISABLED during Optuna optimization for speed
+  visualization:
+    enabled: false # DISABLED during Optuna optimization for speed
+
+# Reference configurations (commented out - handled by RunManager or rarely changed)
+#
+# experiment:
+#   name: "surf_pose_production_optuna"
+#   description: "Hyperparameter optimization for pose estimation models"
+#   version: "1.0"
+#   author: "Production Team"
+#
+# dataset:
+#   base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
+#   video_clips:
+#     input_format: "ffv1"  # Production uses ffv1 format
+#   annotations:
+#     labels_path: "04_ANNOTATED/surf-manoeuvre-labels"
+#   splits:
+#     train_ratio: 0.70
+#     val_ratio: 0.15
+#     test_ratio: 0.15
+#     random_seed: 42
+#
+# hardware:
+#   gpu:
+#     device_id: 0
+#     memory_fraction: 0.9
+#     allow_growth: true
+#   cpu:
+#     num_workers: 8
+#     num_threads: 16
+#   memory:
+#     max_memory_gb: 32
+#     cache_enabled: true
+#     clear_cache_frequency: 50
+#
+# logging:
+#   level: "INFO"
+#   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+#   save_to_file: true
+#
+# debug:
+#   enabled: false
+#   save_intermediate_results: false
+#   profile_memory: false
+#   profile_compute: false
+#   verbose_errors: true
