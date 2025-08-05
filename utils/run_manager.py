@@ -420,29 +420,27 @@ class RunManager:
             logger.warning(f"Failed to update run metadata with selections: {e}")
 
     def get_data_selection_manifest(self, phase: str) -> Optional[str]:
-        """Get path to data selection manifest for a phase
-
-        Args:
-            phase: Phase name (optuna/comparison/visualization)
-
-        Returns:
-            Path to manifest file or None if not found
-        """
-        return self.data_selection_manifests.get(phase)
+        """Get path to data selection manifest for a specific phase"""
+        manifest_file = self.data_selections_dir / f"{phase}_selection.json"
+        if manifest_file.exists():
+            return str(manifest_file)
+        return None
 
     def print_data_selection_summary(self):
         """Print summary of data selections for this run"""
-        if not self.data_selection_manifests:
+        # Check if data selections directory exists and has files
+        if not self.data_selections_dir.exists() or not list(self.data_selections_dir.glob("*.json")):
             print("   📊 Data Selections: None generated")
             return
 
         print(f"   📊 Data Selections:")
-        for phase, manifest_path in self.data_selection_manifests.items():
+        for manifest_file in self.data_selections_dir.glob("*.json"):
+            phase = manifest_file.stem.replace("_selection", "")
             try:
                 from utils.data_selection_manager import DataSelectionManager
 
                 manager = DataSelectionManager({}, run_manager=self)
-                summary = manager.get_manifest_summary(manifest_path)
+                summary = manager.get_manifest_summary(str(manifest_file))
                 # Extract key stats from summary
                 lines = summary.split("\n")
                 clips_line = next((line for line in lines if "• Clips:" in line), "")
@@ -454,8 +452,26 @@ class RunManager:
                 )
             except Exception as e:
                 print(
-                    f"     • {phase.title()}: manifest available ({Path(manifest_path).name})"
+                    f"     • {phase.title()}: manifest available ({manifest_file.name})"
                 )
+
+    def print_data_splits_summary(self):
+        """Print summary of data splits for this run"""
+        # Check if data splits directory exists and has files
+        if not self.data_splits_dir.exists() or not list(self.data_splits_dir.glob("*_split.json")):
+            print("   📊 Data Splits: None generated")
+            return
+
+        print(f"   📊 Data Splits:")
+        for split_file in self.data_splits_dir.glob("*_split.json"):
+            split_name = split_file.stem.replace("_split", "")
+            try:
+                import json
+                with open(split_file, 'r') as f:
+                    split_data = json.load(f)
+                print(f"     • {split_name.title()}: {len(split_data)} clips")
+            except Exception as e:
+                print(f"     • {split_name.title()}: split available ({split_file.name})")
 
     @staticmethod
     def list_previous_runs() -> List[Dict[str, Any]]:
@@ -764,6 +780,7 @@ class RunManager:
         print(f"   Predictions: {self.predictions_dir}")
         print(f"   Visualizations: {self.visualizations_dir}")
         self.print_data_selection_summary()
+        self.print_data_splits_summary()
 
     @staticmethod
     def get_shared_mlflow_uri() -> str:
