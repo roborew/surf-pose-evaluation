@@ -32,7 +32,7 @@ def test_zoom_aware_loading():
                 "input_format": "h264",
             },
             "annotations": {
-                "labels_path": "04_ANNOTATED/surf-manoeuvre-labels",
+                "labels_path": "04_ANNOTATED/EXPORTED-MANEUVER-LABELS",
                 "sony_300_labels": "sony_300",
                 "sony_70_labels": "sony_70",
             },

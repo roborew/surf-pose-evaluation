@@ -57,7 +57,7 @@ class RunManager:
 
         # Use shared POSE directory for multi-machine sync
         self.base_results_dir = Path(
-            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results"
+            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results"
         )
         self.run_dir = self.base_results_dir / "runs" / self.run_name
 
@@ -132,7 +132,7 @@ class RunManager:
     def detect_existing_results() -> bool:
         """Check if there are existing results in the shared directory"""
         shared_results = Path(
-            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results"
+            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results"
         )
         return (shared_results / "runs").exists() and any(
             (shared_results / "runs").iterdir()
@@ -380,7 +380,7 @@ class RunManager:
     def list_previous_runs() -> List[Dict[str, Any]]:
         """List all previous runs with metadata"""
         shared_results = Path(
-            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results"
+            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results"
         )
         runs_dir = shared_results / "runs"
 
@@ -412,7 +412,7 @@ class RunManager:
 
         runs_to_delete = runs[keep_last:]
         shared_results = Path(
-            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results"
+            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results"
         )
         runs_dir = shared_results / "runs"
 
@@ -688,7 +688,7 @@ class RunManager:
     def get_shared_mlflow_uri() -> str:
         """Get the URI for accessing all MLflow experiments in the shared directory"""
         shared_results = Path(
-            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results"
+            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results"
         )
         return f"file://{shared_results.absolute()}"
 
@@ -696,7 +696,7 @@ class RunManager:
     def list_all_experiments() -> List[Dict[str, Any]]:
         """List all MLflow experiments across all runs"""
         shared_results = Path(
-            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results"
+            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results"
         )
         runs_dir = shared_results / "runs"
 

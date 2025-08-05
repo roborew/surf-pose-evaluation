@@ -61,7 +61,7 @@ dependencies:
   # Pip dependencies for pose estimation packages
   - pip:
       - opencv-python==4.8.0.76
-       # MM packages handled by create_surf_pose_env.sh script
+        # MM packages handled by create_surf_pose_env.sh script
       # - mmcv (installed from cache)
       # - mmengine (installed from cache)
       # - mmdet (installed from cache)
@@ -69,6 +69,7 @@ dependencies:
       - mediapipe==0.10.14
       - ultralytics==8.0.165
       - xtcocotools==1.12
+      - watchdog>=3.0.0
 
 # Environment variables for CUDA optimization
 variables:

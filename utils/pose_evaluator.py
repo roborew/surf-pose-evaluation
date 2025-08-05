@@ -116,7 +116,7 @@ class PoseEvaluator:
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 prediction_base_path = prediction_config.get(
                     "base_path",
-                    f"./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/manual_run_{timestamp}/predictions",
+                    f"./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results/manual_run_{timestamp}/predictions",
                 )
                 logging.info(f"Using local prediction storage: {prediction_base_path}")
 

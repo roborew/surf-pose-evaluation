@@ -162,7 +162,7 @@ data/SD_02_SURF_FOOTAGE_PREPT/
 │   ├── h264/           # H.264 video clips (recommended for compatibility)
 │   └── ffv1/           # FFV1 video clips (lossless, larger files)
 ├── 04_ANNOTATED/
-│   └── surf-manoeuvre-labels/
+│   └── EXPORTED-MANEUVER-LABELS/
 │       ├── sony_300/   # Sony 300mm camera annotations
 │       └── sony_70/    # Sony 70mm camera annotations
 └── 05_ANALYSED_DATA/
@@ -394,7 +394,7 @@ When multiple parameters are provided:
 ### Results Structure
 
 ```
-data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/
+data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results/
 └── runs/
     └── 20240315_143022_production_eval/  # Timestamped run directory
         ├── mlruns/                       # MLflow experiment tracking
@@ -865,7 +865,7 @@ if torch.cuda.is_available():
 All results use shared storage for seamless team collaboration:
 
 ```
-data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/
+data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results/
 ├── runs/                    # Individual run directories
 │   ├── 20240315_143022_dev_test/
 │   ├── 20240315_183045_production_eval/
@@ -1106,7 +1106,7 @@ print(f'💿 Disk: {shutil.disk_usage(\"/\")[2] / 1e9:.1f} GB free')
 python utils/mlflow_utils.py --list
 
 # Check specific run
-ls -la data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/runs/
+ls -la data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results/runs/
 
 # Monitor GPU during evaluation
 watch -n 2 'nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv'

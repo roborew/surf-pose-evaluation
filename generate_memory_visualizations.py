@@ -18,7 +18,7 @@ def main():
 
     # Path to your test run
     run_dir = Path(
-        "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/runs/20250728_173010_test_run_5"
+        "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results/runs/20250728_173010_test_run_5"
     )
     report_path = run_dir / "memory_profiling_report.json"
 

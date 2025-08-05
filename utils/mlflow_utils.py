@@ -21,7 +21,7 @@ class MLflowManager:
 
     def __init__(self):
         self.shared_results_dir = Path(
-            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results"
+            "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results"
         )
         self.runs_dir = self.shared_results_dir / "runs"
 

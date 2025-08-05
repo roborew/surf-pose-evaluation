@@ -12,7 +12,7 @@ from pathlib import Path
 def analyze_memory_data():
     # Load the memory profiling data
     report_path = Path(
-        "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE/results/runs/20250728_173010_test_run_5/memory_profiling_report.json"
+        "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results/runs/20250728_173010_test_run_5/memory_profiling_report.json"
     )
 
     print("📊 Loading memory profiling data...")
