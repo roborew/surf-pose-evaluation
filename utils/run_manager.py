@@ -657,33 +657,56 @@ class RunManager:
             )
 
         # Add data selection summary
-        if self.data_selection_manifests:
+        if self.data_selections_dir.exists() and list(self.data_selections_dir.glob("*.json")):
             summary["data_selections"] = {}
-            for phase, manifest_path in self.data_selection_manifests.items():
+            for manifest_file in self.data_selections_dir.glob("*.json"):
+                phase = manifest_file.stem.replace("_selection", "")
                 try:
-                    with open(manifest_path, "r") as f:
+                    with open(manifest_file, "r") as f:
                         manifest_data = json.load(f)
+                    
+                    # Handle different manifest formats
+                    clips_data = manifest_data.get("selected_clips", manifest_data.get("clips", []))
+                    
                     summary["data_selections"][phase] = {
-                        "total_clips": len(manifest_data.get("clips", [])),
-                        "total_maneuvers": len(
-                            set(
-                                clip.get("maneuver_id")
-                                for clip in manifest_data.get("clips", [])
-                            )
-                        ),
-                        "cameras": list(
-                            set(
-                                clip.get("camera")
-                                for clip in manifest_data.get("clips", [])
-                            )
-                        ),
-                        "manifest_path": str(manifest_path),
+                        "total_clips": len(clips_data),
+                        "total_maneuvers": sum(len(clip.get("maneuvers", [])) for clip in clips_data),
+                        "cameras": list(set(clip.get("camera") for clip in clips_data if clip.get("camera"))),
+                        "manifest_path": str(manifest_file),
                     }
                 except Exception as e:
                     summary["data_selections"][phase] = {
                         "error": str(e),
-                        "manifest_path": str(manifest_path),
+                        "manifest_path": str(manifest_file),
                     }
+
+        # Add data splits summary
+        if self.data_splits_dir.exists() and list(self.data_splits_dir.glob("*_split.json")):
+            summary["data_splits"] = {}
+            for split_file in self.data_splits_dir.glob("*_split.json"):
+                split_name = split_file.stem.replace("_split", "")
+                try:
+                    with open(split_file, "r") as f:
+                        split_data = json.load(f)
+                    summary["data_splits"][split_name] = {
+                        "total_clips": len(split_data),
+                        "split_file": str(split_file),
+                    }
+                except Exception as e:
+                    summary["data_splits"][split_name] = {
+                        "error": str(e),
+                        "split_file": str(split_file),
+                    }
+            
+            # Add metadata if available
+            metadata_file = self.data_splits_dir / "splits_metadata.json"
+            if metadata_file.exists():
+                try:
+                    with open(metadata_file, "r") as f:
+                        metadata = json.load(f)
+                    summary["data_splits"]["metadata"] = metadata
+                except Exception as e:
+                    summary["data_splits"]["metadata"] = {"error": str(e)}
 
         summary_file = self.run_dir / "run_summary.json"
         with open(summary_file, "w") as f:
