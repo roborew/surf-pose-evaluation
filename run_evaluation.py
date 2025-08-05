@@ -1482,6 +1482,14 @@ def main():
             optuna_config=optuna_config,
         )
 
+        # Generate data splits for logging and reproducibility
+        logger.info("📊 Generating data splits for logging...")
+        split_files = run_manager.generate_data_splits(
+            config=base_config,
+            random_seed=base_config['data_source']['splits'].get('random_seed', 42)
+        )
+        logger.info(f"✅ Data splits generated: {list(split_files.keys())}")
+
         # Load pre-selected data from manifests
         optuna_maneuvers = []
         comparison_maneuvers = []

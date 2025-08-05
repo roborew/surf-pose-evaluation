@@ -16,9 +16,6 @@ data_source:
     sony_300_labels: "sony_300"
     sony_70_labels: "sony_70"
   splits:
-    train_file: "05_ANALYSED_DATA/POSE_EXPERIMENTS/splits/train_split.json"
-    val_file: "05_ANALYSED_DATA/POSE_EXPERIMENTS/splits/val_split.json"
-    test_file: "05_ANALYSED_DATA/POSE_EXPERIMENTS/splits/test_split.json"
     train_ratio: 0.70
     val_ratio: 0.15
     test_ratio: 0.15

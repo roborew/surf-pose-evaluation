@@ -40,50 +40,64 @@ class RunManager:
         run_name: Optional[str] = None,
         max_clips: Optional[int] = None,
     ):
-        """Initialize run manager with timestamp-based organization
+        """Initialize run manager with organized directory structure"""
+        self.max_clips = max_clips
 
-        Args:
-            run_name: Optional custom run name
-            max_clips: Number of clips (used for naming)
-        """
+        # Generate timestamp and run name
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.run_name = run_name or "evaluation"
 
-        # Create descriptive run name
-        if run_name:
-            self.run_name = f"{self.timestamp}_{run_name}"
-        else:
-            clips_suffix = f"_{max_clips}clips" if max_clips else "_full"
-            self.run_name = f"{self.timestamp}{clips_suffix}"
-
-        # Use shared POSE directory for multi-machine sync
+        # Create organized run directory
         self.base_results_dir = Path(
             "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results"
         )
-        self.run_dir = self.base_results_dir / "runs" / self.run_name
+        self.run_dir = self.base_results_dir / "runs" / f"{self.timestamp}_{self.run_name}"
 
-        # Run-specific subdirectories
-        self.mlflow_dir = self.run_dir / "mlruns"
-        self.predictions_dir = self.run_dir / "predictions"
-        self.visualizations_dir = self.run_dir / "visualizations"
-        self.best_params_dir = self.run_dir / "best_params"
-        self.reports_dir = self.run_dir / "reports"
-        self.data_selections_dir = self.run_dir / "data_selections"
-
-        # Create directories
+        # Create all subdirectories
         self._create_directories()
 
         # Create run metadata
         self._create_run_metadata()
 
-        logger.info(f"🗂️ Created organized run: {self.run_name}")
-        logger.info(f"📁 Run directory: {self.run_dir}")
-        logger.info(f"🔗 Shared results location: {self.base_results_dir}")
+        logger.info(f"🏗️ Created organized run directory: {self.run_dir}")
 
-        # Initialize data selections tracking
-        self.data_selection_manifests = {}
+    @property
+    def mlflow_dir(self) -> Path:
+        """MLflow tracking directory for this run"""
+        return self.run_dir / "mlflow"
+
+    @property
+    def predictions_dir(self) -> Path:
+        """Predictions output directory for this run"""
+        return self.run_dir / "predictions"
+
+    @property
+    def visualizations_dir(self) -> Path:
+        """Visualizations output directory for this run"""
+        return self.run_dir / "visualizations"
+
+    @property
+    def best_params_dir(self) -> Path:
+        """Best parameters directory for this run"""
+        return self.run_dir / "best_params"
+
+    @property
+    def reports_dir(self) -> Path:
+        """Reports directory for this run"""
+        return self.run_dir / "reports"
+
+    @property
+    def data_selections_dir(self) -> Path:
+        """Data selections directory for this run"""
+        return self.run_dir / "data_selections"
+
+    @property
+    def data_splits_dir(self) -> Path:
+        """Data splits directory for this run"""
+        return self.run_dir / "data_splits"
 
     def _create_directories(self):
-        """Create all run-specific directories"""
+        """Create all necessary directories for this run"""
         directories = [
             self.run_dir,
             self.mlflow_dir,
@@ -92,10 +106,13 @@ class RunManager:
             self.best_params_dir,
             self.reports_dir,
             self.data_selections_dir,
+            self.data_splits_dir,
         ]
 
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"📁 Created {len(directories)} directories for run")
 
     def _create_run_metadata(self):
         """Create metadata file for this run"""
@@ -119,6 +136,7 @@ class RunManager:
                 "best_params_dir": str(self.best_params_dir),
                 "reports_dir": str(self.reports_dir),
                 "data_selections_dir": str(self.data_selections_dir),
+                "data_splits_dir": str(self.data_splits_dir),
             },
         }
 
@@ -269,45 +287,108 @@ class RunManager:
         comparison_max_clips: Optional[int] = None,
         optuna_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, str]:
-        """Generate data selection manifests for this run
-
-        Args:
-            config: Complete evaluation configuration (typically comparison config with broader camera selection)
-            optuna_max_clips: Max clips for Optuna phase
-            comparison_max_clips: Max clips for comparison phase
-            optuna_config: Optuna-specific configuration for camera filtering
-
-        Returns:
-            Dictionary mapping phase names to manifest file paths
-        """
+        """Generate data selections for both phases using DataSelectionManager"""
         from utils.data_selection_manager import DataSelectionManager
 
-        logger.info("🎯 Generating data selection manifests for run")
-
         # Initialize data selection manager
-        selection_manager = DataSelectionManager(config, run_manager=self)
+        selection_manager = DataSelectionManager(config, self)
 
-        # Generate phase selections
+        # Generate selections for both phases
         manifest_paths = selection_manager.generate_phase_selections(
             optuna_max_clips=optuna_max_clips,
             comparison_max_clips=comparison_max_clips,
-            random_seed=config.get("data_source", {})
-            .get("splits", {})
-            .get("random_seed", 42),
-            video_format=config.get("data_source", {})
-            .get("video_clips", {})
-            .get("input_format", "h264"),
             optuna_config=optuna_config,
         )
-
-        # Store manifest paths in run manager
-        self.data_selection_manifests.update(manifest_paths)
 
         # Update run metadata with selection info
         self._update_run_metadata_with_selections(manifest_paths)
 
-        logger.info(f"✅ Generated {len(manifest_paths)} data selection manifests")
+        logger.info(f"🎯 Generated data selections for {len(manifest_paths)} phases")
         return manifest_paths
+
+    def generate_data_splits(
+        self,
+        config: Dict[str, Any],
+        random_seed: Optional[int] = None,
+    ) -> Dict[str, str]:
+        """Generate and save data splits to the run folder"""
+        from data_handling.data_loader import SurfingDataLoader
+        import json
+
+        # Initialize data loader
+        loader = SurfingDataLoader(config)
+
+        # Load annotations and discover clips
+        logger.info("📋 Loading annotations...")
+        annotations = loader.load_annotations()
+
+        video_format = config['data_source']['video_clips'].get('input_format', 'h264')
+        logger.info(f"🎥 Discovering video clips (format: {video_format})...")
+        clips = loader.discover_video_clips(video_format)
+
+        logger.info(f"📊 Found {len(clips)} video clips")
+
+        # Set clips for split creation
+        loader.all_clips = clips
+
+        # Create data splits
+        logger.info("🔄 Creating data splits...")
+        splits = loader.create_data_splits(random_seed)
+
+        # Get split statistics
+        stats = splits.get_split_stats()
+        logger.info(f"📈 Split statistics: {stats}")
+
+        # Save splits to JSON files in run folder
+        split_files = {}
+        
+        def save_split(clips, split_name):
+            split_data = []
+            for clip in clips:
+                clip_data = {
+                    'video_path': str(clip.file_path),
+                    'video_id': clip.video_id,
+                    'camera': clip.camera,
+                    'session': clip.session,
+                    'duration': clip.duration,
+                    'fps': clip.fps,
+                    'width': clip.width,
+                    'height': clip.height,
+                    'format': clip.format,
+                    'zoom_level': clip.zoom_level,
+                    'base_clip_id': clip.base_clip_id,
+                    'annotations': clip.annotations
+                }
+                split_data.append(clip_data)
+            
+            output_file = self.data_splits_dir / f'{split_name}_split.json'
+            with open(output_file, 'w') as f:
+                json.dump(split_data, f, indent=2, default=str)
+            
+            logger.info(f"💾 Saved {len(split_data)} clips to {output_file}")
+            return str(output_file)
+
+        # Save each split
+        split_files['train'] = save_split(splits.train, 'train')
+        split_files['val'] = save_split(splits.val, 'val')
+        split_files['test'] = save_split(splits.test, 'test')
+
+        # Save split metadata
+        split_metadata = {
+            'generation_timestamp': datetime.now().isoformat(),
+            'random_seed': random_seed or config['data_source']['splits'].get('random_seed', 42),
+            'video_format': video_format,
+            'total_clips': len(clips),
+            'split_statistics': stats,
+            'split_files': split_files
+        }
+
+        metadata_file = self.data_splits_dir / 'splits_metadata.json'
+        with open(metadata_file, 'w') as f:
+            json.dump(split_metadata, f, indent=2, default=str)
+
+        logger.info(f"✅ Generated data splits: {split_files}")
+        return split_files
 
     def _update_run_metadata_with_selections(self, manifest_paths: Dict[str, str]):
         """Update run metadata file with data selection information
