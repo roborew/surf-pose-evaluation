@@ -49,7 +49,10 @@ class MLflowManager:
         experiments = []
         for run_dir in sorted(self.runs_dir.iterdir(), reverse=True):
             if run_dir.is_dir():
+                # Prefer standardized 'mlruns', support legacy 'mlflow'
                 mlflow_dir = run_dir / "mlruns"
+                if not mlflow_dir.exists():
+                    mlflow_dir = run_dir / "mlflow"
                 if mlflow_dir.exists():
                     # Find experiment directories (numbered folders)
                     for exp_dir in mlflow_dir.iterdir():

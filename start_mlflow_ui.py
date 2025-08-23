@@ -23,19 +23,22 @@ def choose_experiment_run(mlflow_manager):
         print(f"❌ No runs directory found at: {runs_dir}")
         return None
 
-    # Find all run directories with mlruns
+    # Find all run directories with mlruns (or legacy mlflow)
     available_runs = []
     for run_dir in sorted(runs_dir.iterdir(), reverse=True):
         if run_dir.is_dir():
-            mlruns_dir = run_dir / "mlruns"
-            if mlruns_dir.exists():
+            # Prefer standardized 'mlruns', but support legacy 'mlflow'
+            ml_dir = run_dir / "mlruns"
+            if not ml_dir.exists():
+                ml_dir = run_dir / "mlflow"
+            if ml_dir.exists():
                 # Check if it has actual MLflow data
-                has_data = any(mlruns_dir.iterdir())
+                has_data = any(ml_dir.iterdir())
                 available_runs.append(
                     {
                         "name": run_dir.name,
                         "path": run_dir,
-                        "mlruns_path": mlruns_dir,
+                        "mlruns_path": ml_dir,
                         "has_data": has_data,
                     }
                 )
@@ -124,12 +127,15 @@ def main():
         print(f"🎯 Using manual backend store URI: {backend_store_uri}")
     elif args.run_name:
         # Use specified run name
-        mlruns_path = (
-            mlflow_manager.shared_results_dir / "runs" / args.run_name / "mlruns"
-        )
+        base_path = mlflow_manager.shared_results_dir / "runs" / args.run_name
+        mlruns_path = base_path / "mlruns"
         if not mlruns_path.exists():
-            print(f"❌ Run '{args.run_name}' not found or has no MLflow data")
-            sys.exit(1)
+            legacy_path = base_path / "mlflow"
+            if legacy_path.exists():
+                mlruns_path = legacy_path
+            else:
+                print(f"❌ Run '{args.run_name}' not found or has no MLflow data")
+                sys.exit(1)
         backend_store_uri = f"file://{mlruns_path.absolute()}"
     else:
         # Let user choose

@@ -51,7 +51,9 @@ class RunManager:
         self.base_results_dir = Path(
             "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results"
         )
-        self.run_dir = self.base_results_dir / "runs" / f"{self.timestamp}_{self.run_name}"
+        self.run_dir = (
+            self.base_results_dir / "runs" / f"{self.timestamp}_{self.run_name}"
+        )
 
         # Create all subdirectories
         self._create_directories()
@@ -64,7 +66,8 @@ class RunManager:
     @property
     def mlflow_dir(self) -> Path:
         """MLflow tracking directory for this run"""
-        return self.run_dir / "mlflow"
+        # Standardize on 'mlruns' to match MLflow default folder naming
+        return self.run_dir / "mlruns"
 
     @property
     def predictions_dir(self) -> Path:
@@ -322,7 +325,7 @@ class RunManager:
         logger.info("📋 Loading annotations...")
         annotations = loader.load_annotations()
 
-        video_format = config['data_source']['video_clips'].get('input_format', 'h264')
+        video_format = config["data_source"]["video_clips"].get("input_format", "h264")
         logger.info(f"🎥 Discovering video clips (format: {video_format})...")
         clips = loader.discover_video_clips(video_format)
 
@@ -341,50 +344,51 @@ class RunManager:
 
         # Save splits to JSON files in run folder
         split_files = {}
-        
+
         def save_split(clips, split_name):
             split_data = []
             for clip in clips:
                 clip_data = {
-                    'video_path': str(clip.file_path),
-                    'video_id': clip.video_id,
-                    'camera': clip.camera,
-                    'session': clip.session,
-                    'duration': clip.duration,
-                    'fps': clip.fps,
-                    'width': clip.width,
-                    'height': clip.height,
-                    'format': clip.format,
-                    'zoom_level': clip.zoom_level,
-                    'base_clip_id': clip.base_clip_id,
-                    'annotations': clip.annotations
+                    "video_path": str(clip.file_path),
+                    "video_id": clip.video_id,
+                    "camera": clip.camera,
+                    "session": clip.session,
+                    "duration": clip.duration,
+                    "fps": clip.fps,
+                    "width": clip.width,
+                    "height": clip.height,
+                    "format": clip.format,
+                    "zoom_level": clip.zoom_level,
+                    "base_clip_id": clip.base_clip_id,
+                    "annotations": clip.annotations,
                 }
                 split_data.append(clip_data)
-            
-            output_file = self.data_splits_dir / f'{split_name}_split.json'
-            with open(output_file, 'w') as f:
+
+            output_file = self.data_splits_dir / f"{split_name}_split.json"
+            with open(output_file, "w") as f:
                 json.dump(split_data, f, indent=2, default=str)
-            
+
             logger.info(f"💾 Saved {len(split_data)} clips to {output_file}")
             return str(output_file)
 
         # Save each split
-        split_files['train'] = save_split(splits.train, 'train')
-        split_files['val'] = save_split(splits.val, 'val')
-        split_files['test'] = save_split(splits.test, 'test')
+        split_files["train"] = save_split(splits.train, "train")
+        split_files["val"] = save_split(splits.val, "val")
+        split_files["test"] = save_split(splits.test, "test")
 
         # Save split metadata
         split_metadata = {
-            'generation_timestamp': datetime.now().isoformat(),
-            'random_seed': random_seed or config['data_source']['splits'].get('random_seed', 42),
-            'video_format': video_format,
-            'total_clips': len(clips),
-            'split_statistics': stats,
-            'split_files': split_files
+            "generation_timestamp": datetime.now().isoformat(),
+            "random_seed": random_seed
+            or config["data_source"]["splits"].get("random_seed", 42),
+            "video_format": video_format,
+            "total_clips": len(clips),
+            "split_statistics": stats,
+            "split_files": split_files,
         }
 
-        metadata_file = self.data_splits_dir / 'splits_metadata.json'
-        with open(metadata_file, 'w') as f:
+        metadata_file = self.data_splits_dir / "splits_metadata.json"
+        with open(metadata_file, "w") as f:
             json.dump(split_metadata, f, indent=2, default=str)
 
         logger.info(f"✅ Generated data splits: {split_files}")
@@ -429,7 +433,9 @@ class RunManager:
     def print_data_selection_summary(self):
         """Print summary of data selections for this run"""
         # Check if data selections directory exists and has files
-        if not self.data_selections_dir.exists() or not list(self.data_selections_dir.glob("*.json")):
+        if not self.data_selections_dir.exists() or not list(
+            self.data_selections_dir.glob("*.json")
+        ):
             print("   📊 Data Selections: None generated")
             return
 
@@ -458,7 +464,9 @@ class RunManager:
     def print_data_splits_summary(self):
         """Print summary of data splits for this run"""
         # Check if data splits directory exists and has files
-        if not self.data_splits_dir.exists() or not list(self.data_splits_dir.glob("*_split.json")):
+        if not self.data_splits_dir.exists() or not list(
+            self.data_splits_dir.glob("*_split.json")
+        ):
             print("   📊 Data Splits: None generated")
             return
 
@@ -467,11 +475,14 @@ class RunManager:
             split_name = split_file.stem.replace("_split", "")
             try:
                 import json
-                with open(split_file, 'r') as f:
+
+                with open(split_file, "r") as f:
                     split_data = json.load(f)
                 print(f"     • {split_name.title()}: {len(split_data)} clips")
             except Exception as e:
-                print(f"     • {split_name.title()}: split available ({split_file.name})")
+                print(
+                    f"     • {split_name.title()}: split available ({split_file.name})"
+                )
 
     @staticmethod
     def list_previous_runs() -> List[Dict[str, Any]]:
@@ -657,21 +668,33 @@ class RunManager:
             )
 
         # Add data selection summary
-        if self.data_selections_dir.exists() and list(self.data_selections_dir.glob("*.json")):
+        if self.data_selections_dir.exists() and list(
+            self.data_selections_dir.glob("*.json")
+        ):
             summary["data_selections"] = {}
             for manifest_file in self.data_selections_dir.glob("*.json"):
                 phase = manifest_file.stem.replace("_selection", "")
                 try:
                     with open(manifest_file, "r") as f:
                         manifest_data = json.load(f)
-                    
+
                     # Handle different manifest formats
-                    clips_data = manifest_data.get("selected_clips", manifest_data.get("clips", []))
-                    
+                    clips_data = manifest_data.get(
+                        "selected_clips", manifest_data.get("clips", [])
+                    )
+
                     summary["data_selections"][phase] = {
                         "total_clips": len(clips_data),
-                        "total_maneuvers": sum(len(clip.get("maneuvers", [])) for clip in clips_data),
-                        "cameras": list(set(clip.get("camera") for clip in clips_data if clip.get("camera"))),
+                        "total_maneuvers": sum(
+                            len(clip.get("maneuvers", [])) for clip in clips_data
+                        ),
+                        "cameras": list(
+                            set(
+                                clip.get("camera")
+                                for clip in clips_data
+                                if clip.get("camera")
+                            )
+                        ),
                         "manifest_path": str(manifest_file),
                     }
                 except Exception as e:
@@ -681,7 +704,9 @@ class RunManager:
                     }
 
         # Add data splits summary
-        if self.data_splits_dir.exists() and list(self.data_splits_dir.glob("*_split.json")):
+        if self.data_splits_dir.exists() and list(
+            self.data_splits_dir.glob("*_split.json")
+        ):
             summary["data_splits"] = {}
             for split_file in self.data_splits_dir.glob("*_split.json"):
                 split_name = split_file.stem.replace("_split", "")
@@ -697,7 +722,7 @@ class RunManager:
                         "error": str(e),
                         "split_file": str(split_file),
                     }
-            
+
             # Add metadata if available
             metadata_file = self.data_splits_dir / "splits_metadata.json"
             if metadata_file.exists():
