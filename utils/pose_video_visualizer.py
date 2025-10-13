@@ -388,6 +388,10 @@ class PoseVideoVisualizer:
             Success status
         """
         try:
+            # Debug: Print video path
+            logger.info(f"Attempting to open video: {repr(video_path)}")
+            logger.info(f"Video path exists: {Path(video_path).exists()}")
+
             # Open input video
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -633,8 +637,10 @@ class PoseVideoVisualizer:
     ) -> bool:
         """Create video from frame images using FFmpeg"""
         try:
-            # Create output directory
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            # Create output directory when one is provided
+            output_dir = os.path.dirname(output_path)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
 
             # Extract audio from original video
             temp_audio = frames_dir / "audio.aac"
