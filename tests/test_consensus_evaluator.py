@@ -1,5 +1,6 @@
 import sys
 from types import SimpleNamespace, ModuleType
+from pathlib import Path
 
 
 if "torch" not in sys.modules:
@@ -70,7 +71,42 @@ if "utils.pose_evaluator" not in sys.modules:
     pose_evaluator_module.PoseEvaluator = _PoseEvaluatorStub
     sys.modules["utils.pose_evaluator"] = pose_evaluator_module
 
+if "optuna" not in sys.modules:
+    sys.modules["optuna"] = ModuleType("optuna")
+
+if "utils.optuna_optimizer" not in sys.modules:
+    optuna_optimizer_module = ModuleType("utils.optuna_optimizer")
+
+    class _OptunaPoseOptimizerStub:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    optuna_optimizer_module.OptunaPoseOptimizer = _OptunaPoseOptimizerStub
+    sys.modules["utils.optuna_optimizer"] = optuna_optimizer_module
+
+if "utils.run_manager" not in sys.modules:
+    run_manager_module = ModuleType("utils.run_manager")
+
+    class _RunManagerStub:
+        def __init__(self, *args, **kwargs):
+            self.mlflow_dir = "/tmp"
+            self.run_dir = Path(".")
+
+    run_manager_module.RunManager = _RunManagerStub
+    sys.modules["utils.run_manager"] = run_manager_module
+
+if "utils.memory_profiler" not in sys.modules:
+    memory_profiler_module = ModuleType("utils.memory_profiler")
+
+    class _MemoryProfilerStub:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    memory_profiler_module.MemoryProfiler = _MemoryProfilerStub
+    sys.modules["utils.memory_profiler"] = memory_profiler_module
+
 from utils.consensus_evaluator import ConsensusEvaluator
+from run_evaluation import merge_consensus_with_comparison
 
 
 def _make_maneuver(mid: str) -> SimpleNamespace:
@@ -107,3 +143,33 @@ def test_aggregate_consensus_metrics_caps_high_confidence_to_perfect_score():
     assert (
         result["consensus_pck_0.2"] < 1.0
     ), "raw confidence >1 should not yield perfect consensus"
+
+
+def test_merge_consensus_supports_multiple_pck_thresholds():
+    maneuvers = [_make_maneuver("m1")]
+
+    consensus = {
+        "pytorch_pose": {
+            "consensus_metrics": {
+                "m1": {
+                    "relative_pck": {
+                        "consensus_pck_error": 0.2,
+                        "consensus_pck_0.1": 0.7,
+                        "consensus_pck_0.2": 0.8,
+                        "consensus_pck_0.3": 0.85,
+                        "consensus_pck_0.5": 0.9,
+                    },
+                    "consensus_quality": {
+                        "consensus_coverage": 0.6,
+                        "avg_consensus_confidence": 0.5,
+                    },
+                }
+            }
+        }
+    }
+
+    merged = merge_consensus_with_comparison({"pytorch_pose": {}}, consensus)
+
+    assert "pose_consensus_pck_0.1_mean" in merged["pytorch_pose"]
+    assert "pose_consensus_pck_0.3_mean" in merged["pytorch_pose"]
+    assert "pose_consensus_pck_0.5_mean" in merged["pytorch_pose"]

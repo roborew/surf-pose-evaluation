@@ -355,6 +355,7 @@ class ConsensusMetrics:
         model_predictions: List[Dict[str, Any]],
         consensus_predictions: List[Dict[str, Any]],
         threshold: float = 0.2,
+        additional_thresholds: Optional[List[float]] = None,
     ) -> Dict[str, float]:
         """Calculate PCK-like metric against consensus rather than ground truth
 
@@ -480,7 +481,7 @@ class ConsensusMetrics:
             else 0.0
         )
 
-        return {
+        metrics = {
             f"consensus_pck_{threshold}": relative_pck,
             "consensus_pck_error": 1.0 - relative_pck,
             "consensus_mean_normalized_distance": mean_distance,
@@ -491,6 +492,24 @@ class ConsensusMetrics:
             "model_total_frames": model_frame_count,
             "consensus_total_frames": consensus_frame_count,
         }
+
+        # Compute additional thresholds if requested
+        if additional_thresholds:
+            extra_thresholds_sorted = sorted(set(additional_thresholds))
+            for extra_threshold in extra_thresholds_sorted:
+                if extra_threshold <= 0:
+                    continue
+
+                extra_correct = sum(
+                    1 for distance in all_distances if distance <= extra_threshold
+                )
+
+                if total_valid > 0:
+                    metrics[f"consensus_pck_{extra_threshold}"] = (
+                        extra_correct / total_valid
+                    )
+
+        return metrics
 
     def _match_predictions_to_consensus(
         self, pred: Dict[str, Any], consensus: Dict[str, Any]

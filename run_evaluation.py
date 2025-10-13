@@ -885,22 +885,44 @@ def merge_consensus_with_comparison(
                         )
 
                 # Add aggregated consensus-based metrics
+                base_metrics = merged_results[model_name]
+
                 if all_relative_pck:
-                    merged_results[model_name]["pose_consensus_pck_error_mean"] = (
-                        1.0 - np.mean(all_relative_pck)
+                    base_metrics["pose_consensus_pck_error_mean"] = 1.0 - np.mean(
+                        all_relative_pck
                     )
+
                 if all_relative_pck_02:
-                    merged_results[model_name]["pose_consensus_pck_0.2_mean"] = np.mean(
+                    base_metrics["pose_consensus_pck_0.2_mean"] = np.mean(
                         all_relative_pck_02
                     )
+
                 if all_consensus_coverage:
-                    merged_results[model_name]["pose_consensus_coverage_mean"] = (
-                        np.mean(all_consensus_coverage)
+                    base_metrics["pose_consensus_coverage_mean"] = np.mean(
+                        all_consensus_coverage
                     )
+
                 if all_consensus_confidence:
-                    merged_results[model_name]["pose_consensus_confidence_mean"] = (
-                        np.mean(all_consensus_confidence)
+                    base_metrics["pose_consensus_confidence_mean"] = np.mean(
+                        all_consensus_confidence
                     )
+
+                # Persist other consensus thresholds discovered in relative_pck data
+                # Persist other consensus thresholds discovered in relative_pck data
+                threshold_values_map: Dict[str, List[float]] = {}
+
+                for maneuver_metrics in consensus_metrics.values():
+                    rp_metrics = maneuver_metrics.get("relative_pck", {})
+                    for key, value in rp_metrics.items():
+                        if key.startswith("consensus_pck_"):
+                            threshold_values_map.setdefault(key, []).append(value)
+
+                for threshold_key, values in threshold_values_map.items():
+                    if threshold_key == "consensus_pck_error":
+                        continue
+
+                    metric_name = f"pose_{threshold_key}_mean"
+                    base_metrics[metric_name] = float(np.mean(values))
 
                 logger.info(f"✅ Added consensus metrics for {model_name}")
             else:
@@ -1486,7 +1508,7 @@ def main():
         logger.info("📊 Generating data splits for logging...")
         split_files = run_manager.generate_data_splits(
             config=base_config,
-            random_seed=base_config['data_source']['splits'].get('random_seed', 42)
+            random_seed=base_config["data_source"]["splits"].get("random_seed", 42),
         )
         logger.info(f"✅ Data splits generated: {list(split_files.keys())}")
 

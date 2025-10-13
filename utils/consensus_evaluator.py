@@ -466,7 +466,9 @@ class ConsensusEvaluator:
 
                 # Calculate relative PCK between model and consensus
                 relative_pck = self.consensus_metrics.calculate_relative_pck(
-                    transformed_predictions, consensus_predictions
+                    transformed_predictions,
+                    consensus_predictions,
+                    additional_thresholds=[0.1, 0.3, 0.5],
                 )
 
                 # Calculate consensus quality metrics
@@ -566,33 +568,28 @@ class ConsensusEvaluator:
             normalized_delta = min(1.0, delta / scale)
             return 1.0 - normalized_delta
 
-        for i, maneuver in enumerate(maneuvers):
-            if i < len(model_predictions):
-                model_pred_data = model_predictions[i]
-                frame_predictions = model_pred_data.get("frames", [])
+        for model_pred_data in model_predictions:
+            frame_predictions = model_pred_data.get("frames", [])
 
-                if frame_predictions:
-                    # Calculate detection rate for this maneuver
-                    frames_with_detections = sum(
-                        1
-                        for frame in frame_predictions
-                        if len(frame.get("persons", [])) > 0
-                    )
-                    detection_rate = frames_with_detections / len(frame_predictions)
-                    model_detection_rates.append(detection_rate)
+            if frame_predictions:
+                frames_with_detections = sum(
+                    1
+                    for frame in frame_predictions
+                    if len(frame.get("persons", [])) > 0
+                )
+                detection_rate = frames_with_detections / len(frame_predictions)
+                model_detection_rates.append(detection_rate)
 
-                    # Calculate average confidence for this maneuver
-                    all_confidences = _collect_normalized_confidences(frame_predictions)
-                    total_persons = sum(
-                        len(frame.get("persons", []) or [])
-                        for frame in frame_predictions
-                    )
+                all_confidences = _collect_normalized_confidences(frame_predictions)
+                total_persons = sum(
+                    len(frame.get("persons", []) or []) for frame in frame_predictions
+                )
 
-                    avg_confidence = (
-                        float(np.mean(all_confidences)) if all_confidences else 0.0
-                    )
-                    model_confidence_scores.append(avg_confidence)
-                    model_person_counts.append(total_persons / len(frame_predictions))
+                avg_confidence = (
+                    float(np.mean(all_confidences)) if all_confidences else 0.0
+                )
+                model_confidence_scores.append(avg_confidence)
+                model_person_counts.append(total_persons / len(frame_predictions))
 
         # Calculate reference metrics (average of all reference models except current)
         ref_detection_rates = []
@@ -603,40 +600,37 @@ class ConsensusEvaluator:
             if ref_model != model_name and ref_model in self.all_model_predictions:
                 ref_predictions = self.all_model_predictions[ref_model]
 
-                for i, maneuver in enumerate(maneuvers):
-                    if i < len(ref_predictions):
-                        ref_pred_data = ref_predictions[i]
-                        ref_frame_predictions = ref_pred_data.get("frames", [])
+                for ref_pred_data in ref_predictions:
+                    ref_frame_predictions = ref_pred_data.get("frames", [])
 
-                        if ref_frame_predictions:
-                            # Same calculations for reference model
-                            ref_frames_with_detections = sum(
-                                1
-                                for frame in ref_frame_predictions
-                                if len(frame.get("persons", [])) > 0
-                            )
-                            ref_detection_rate = ref_frames_with_detections / len(
-                                ref_frame_predictions
-                            )
-                            ref_detection_rates.append(ref_detection_rate)
+                    if ref_frame_predictions:
+                        ref_frames_with_detections = sum(
+                            1
+                            for frame in ref_frame_predictions
+                            if len(frame.get("persons", [])) > 0
+                        )
+                        ref_detection_rate = ref_frames_with_detections / len(
+                            ref_frame_predictions
+                        )
+                        ref_detection_rates.append(ref_detection_rate)
 
-                            ref_all_confidences = _collect_normalized_confidences(
-                                ref_frame_predictions
-                            )
-                            ref_total_persons = sum(
-                                len(frame.get("persons", []) or [])
-                                for frame in ref_frame_predictions
-                            )
+                        ref_all_confidences = _collect_normalized_confidences(
+                            ref_frame_predictions
+                        )
+                        ref_total_persons = sum(
+                            len(frame.get("persons", []) or [])
+                            for frame in ref_frame_predictions
+                        )
 
-                            ref_avg_confidence = (
-                                float(np.mean(ref_all_confidences))
-                                if ref_all_confidences
-                                else 0.0
-                            )
-                            ref_confidence_scores.append(ref_avg_confidence)
-                            ref_person_counts.append(
-                                ref_total_persons / len(ref_frame_predictions)
-                            )
+                        ref_avg_confidence = (
+                            float(np.mean(ref_all_confidences))
+                            if ref_all_confidences
+                            else 0.0
+                        )
+                        ref_confidence_scores.append(ref_avg_confidence)
+                        ref_person_counts.append(
+                            ref_total_persons / len(ref_frame_predictions)
+                        )
 
         # Calculate consensus metrics
         if not model_detection_rates or not ref_detection_rates:
