@@ -1,0 +1,52 @@
+---
+description:  Investigation-only rule: generates design options that respect the active
+  framework’s conventions, include illustrative mock code, and analyse both
+  immediate and long-term performance (Big-O & DB impact).  No file edits.
+globs: 
+alwaysApply: false
+type: Manual
+---
+
+---
+
+# 🎯 **Investigation-Only Workflow**
+
+**ABSOLUTELY DO NOT** create, modify, or delete any project files in this phase.
+
+## Guiding Principles
+
+- **Honor Framework Conventions**  
+  Identify the primary stack (Rails, Laravel, React, Next .js, etc.) from repo context or ask me to confirm.  
+  Show how each option leverages that framework’s idioms (generators, facades, hooks, folder layout).  
+  Deviate only if the problem demands it—justify why and note risks.
+
+- **Illustrative, Non-Production Code**  
+  For each option provide a **brief skeleton or pseudo-code snippet** (≤ 20 lines) that conveys the shape
+  of the solution. Mark clearly as _illustrative only_—not copy-paste-ready.
+
+- **Performance Impact (Short & Long Term)**  
+  Estimate Big-O time & space. Flag expensive DB operations (e.g., O (n) full-table scans) and suggest
+  mitigations such as indexing, caching, batching, or denormalisation.
+
+## Deliverables (in order)
+
+1. **Solution Options** – 3-6 strategies, ordered from _simplest/quickest_ to _most robust_.
+2. **Trade-Off Matrix** (per option):
+   - High-level summary (≤ 2 sentences)
+   - Pros / Cons bullets
+   - **Big-O Time & Space** and DB query characteristics
+   - Maintainability & extensibility notes
+   - Framework-specific alignment (which generators / facades / hooks, etc.)
+   - **Illustrative Snippet** (pseudo-code or skeleton)
+   - Key risks, edge-cases, assumptions
+   - Links to best-practice references (RFCs, docs, patterns)
+3. **Open Questions** you still need answered.
+4. **Current Recommendation** and rationale.
+
+## Conversation Rules
+
+- After the four items above, **stop and wait** for my reply.
+- You may ask clarifying questions and refine options, but **never** write or apply code changes.
+- Proceed to code only when I explicitly say: **“Proceed to implementation.”**
+
+_End of rule._

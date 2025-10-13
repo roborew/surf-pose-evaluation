@@ -1,0 +1,84 @@
+---
+description: Structured REFACTOR workflow: preserve observable behaviour while
+  improving design, readability, performance, or maintainability.
+globs: 
+alwaysApply: false
+type: Manual
+---
+
+# Approach:
+
+① Scouting Phase (“Assess”)
+• **No production code changes** yet.  
+ • Identify smells (duplication, long methods, feature envy, etc.) and
+map the dependency graph of the area in question.  
+ • Produce a **Refactor Plan** containing:  
+ – Goals (e.g. “extract domain object”, “replace inheritance with
+composition”)  
+ – Risky hotspots (global state, reflection, meta-prog)  
+ – Current test-coverage gaps (add “characterisation” tests if
+needed)  
+ – Performance constraints and rollback strategy  
+ • Wait for **“Approve refactor plan”**.
+② Guardrail Phase (“Safety Net”)
+• Add or extend tests to lock in today’s behaviour (characterisation).  
+ • Suite MUST pass exactly as before.  
+ • Pause for **“Approve safety net”**.
+③ Refactor Phase (“Code”)
+• Micro-TDD slices (<200 LOC/commit):
+• Strictly follow principles: KISS, YAGNI, DRY, SOLID, CLEAN CODE, etc.
+
+1.  Run suite (should pass)
+2.  Apply a single small refactor (rename, extract method, etc.)
+3.  Re-run suite; if green, commit.  
+     • After each slice: explain intent, DRY/SOLID impact, perf delta.  
+     • Wait for **“Apply slice N”** after every diff set.
+    ④ Finalise
+    • Remove dead code, update docs/comments.  
+     • Run full suite + linter + perf benchmarks; present report.  
+     • Await **“Ship it”** before merge.
+
+# 🔄 Refactor-First Workflow
+
+## 0️⃣ Trigger
+
+_“refactor” label, tech-debt ticket, or reviewer request._
+
+## 1️⃣ Scouting Phase (Assess)
+
+1. Walk the code; list smells + dependencies.
+2. Draft **Refactor Plan** (goals, risks, coverage gaps).
+3. ↪︎ _Wait for_ **“Approve refactor plan”**.
+
+## 2️⃣ Guardrail Phase (Safety Net)
+
+1. Add/extend characterisation tests where coverage < 80 %.
+2. Ensure suite still green.
+3. ↪︎ _Wait for_ **“Approve safety net”**.
+
+## 3️⃣ Refactor Phase (Code)
+
+_Repeat micro-TDD loop until goals met._
+
+| Step           | LOC limit              |
+| -------------- | ---------------------- |
+| Diff per slice | ≤ 120 (tests + prod)   |
+| Commit msg     | imperative, ≤ 72 chars |
+
+↪︎ _Pause for_ **“Apply slice N”** after each iteration.
+
+## 4️⃣ Finalise
+
+_Run suite, lint, perf check → report → “Ship it”._
+
+## Conversation Rules
+
+1. **No behavioural change** allowed; if behaviour _must_ change,
+   escalate back to a feature or bug-fix rule.
+2. Ask clarifying questions whenever context is ambiguous.
+3. Keep suite green & linter clean at every pause.
+4. Cite docs only in explanations, not in commit messages.
+5. Explicit approvals gate each phase: **Assess → Safety Net → Code → Ship**.
+6. Git
+
+_End of rule._

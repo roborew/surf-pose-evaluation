@@ -1,0 +1,85 @@
+---
+description: Step-by-step implementation rule: true micro-TDD, DRY, SOLID,
+  idiomatic to whichever framework the project uses. The agent pauses
+  after EVERY slice for human review. External links optional; include
+  only when clarifying. 
+globs: 
+alwaysApply: false
+type: Manual
+---
+
+---
+
+# 🚀 Implementation-Only Workflow
+
+**This phase executes the solution already chosen in investigation.**
+
+## Guiding Principles
+
+- **Auto-Detect Framework**  
+  Infer stack from repo (e.g., presence of `config/application.rb`, `artisan`, `next.config.js`, etc.)  
+  —or ask me if unsure. Follow its conventions _(Rails CoC, Laravel container/facades, React Hooks,
+  Next.js app/ routing, etc.)_ [oai_citation:9‡stackoverflow.com](mdc:https:/stackoverflow.com/questions/71985512/convention-over-configuration-in-rails?utm_source=chatgpt.com) [oai_citation:10‡medium.com](mdc:https:/medium.com/%40sky8052785942ocean/unlocking-the-power-of-laravel-service-container-service-providers-and-facades-b829efd3cf5f?utm_source=chatgpt.com) [oai_citation:11‡legacy.reactjs.org](mdc:https:/legacy.reactjs.org/docs/hooks-rules.html?utm_source=chatgpt.com) [oai_citation:12‡reddit.com](mdc:https:/www.reddit.com/r/nextjs/comments/1dc17tv/best_practice_for_folder_structure_in_nextjs_app/?utm_source=chatgpt.com)
+- **Micro-TDD Loop**  
+  For each new behaviour:
+  1. Add **one failing test** (Red)
+  2. Write minimal production code to pass (Green)
+  3. Refactor for DRY/SOLID/cleanliness (Refactor)
+- **Atomic Commits** – ≤ 200 changed LOC per slice. [oai_citation:13‡tekin.co.uk](mdc:https:/tekin.co.uk/2020/05/proof-your-thousand-line-pull-requests-create-more-bugs?utm_source=chatgpt.com)
+- **Performance Check** – after every slice: reconfirm Big-O and DB footprint; propose index/caching if needed. [oai_citation:14‡percona.com](mdc:https:/www.percona.com/blog/full-table-scan-vs-full-index-scan-performance/?utm_source=chatgpt.com)
+- **Optional External Links** – only include docs/RFC URLs when they substantially aid understanding.
+  • Strictly follow principles: KISS, YAGNI, DRY, SOLID, CLEAN CODE, etc.
+
+## Deliverables & Flow
+
+### 0️⃣ Implementation Plan
+
+- Summary of chosen design
+- Files/classes to touch
+- Test-strategy outline
+- Risk & rollback notes  
+  _⇢ wait for “Approve plan”_
+
+### 1️⃣ Slice Loop (repeat)
+
+For each micro-TDD slice:
+
+1. **Failing test diff** (≤ 40 LOC)
+2. **Passing code diff** (≤ 80 LOC)
+3. **Refactor diff** (≤ 40 LOC, if needed)
+4. Explanation (why, DRY/SOLID notes, perf impact)
+5. Commit message  
+   _⇢ wait for “Apply slice N”_
+
+### ⚠️ Test–Config Hygiene
+
+• **NEVER bake environment-specific data** (e.g. domains, hostnames,
+API keys, ports, CDN URLs) directly into tests, fixtures, factories,
+or seeds.  
+• **ALWAYS pull such values from ENV/credentials** that can be set per
+environment (`ENV['APP_HOST']`, `Rails.application.credentials...`,
+etc.) in line with the 12-Factor “Config” principle.  
+• If the required ENV/credential key does **not yet exist**, the agent
+MUST:
+
+1.  Recommend a descriptive name (UPPER_SNAKE_CASE),
+2.  Pause for confirmation,
+3.  Add minimal wiring (e.g. `.env.test`, `credentials.yml.enc`,
+    CI secrets) in the next slice.  
+    • Any PR that introduces hard-coded environment data **fails CI** and
+    must be fixed before merge.
+
+### 2️⃣ Final Polish
+
+- Remove duplication, update docs
+- Run full test suite; report coverage & perf delta  
+  _⇢ wait for “Ship it”_
+
+## Conversation Rules
+
+1. Stop after every bullet-point list or diff set until I explicitly advance.
+2. Ask clarifying questions whenever repo context is ambiguous.
+3. Keep the suite green and linter clean at each pause.
+4. Cite docs only in explanations, not commit messages, and only when helpful.
+
+_End of rule._

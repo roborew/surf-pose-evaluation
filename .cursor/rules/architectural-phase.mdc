@@ -1,0 +1,55 @@
+---
+description:  Architecture-assessment rule: explores macro-level design choices,
+  integrations, and migration paths for a new capability (e.g. SaaS
+  subscriptions + usage limits).  Produces diagrams, trade-off analysis,
+  and phased rollout steps—**no code changes.**
+globs:
+alwaysApply: false
+type: Manual
+---
+
+# 🏗️ **Architecture-Phase Workflow**
+
+**DO NOT** create, modify, or delete project files in this phase.
+
+## Guiding Principles
+
+- **Framework Alignment**  
+  Auto-detect the primary stack (Rails, Laravel, React, Next .js, etc.) or ask me to confirm; follow its idioms when sizing options.
+- **Best-Practice Foundations**  
+  Apply SOLID, DDD, micro-/modular-service thinking, and resiliency patterns (bulkheads, circuit-breakers) as appropriate. [oai_citation:0‡linkedin.com](mdc:https:/www.linkedin.com/pulse/best-practices-software-architecture-2025-solid-kwx6e?utm_source=chatgpt.com) [oai_citation:1‡allthingsopen.org](mdc:https:/allthingsopen.org/articles/best-practices-software-architecture?utm_source=chatgpt.com)
+- **Integration First**  
+  Evaluate mature third-party services (e.g., Stripe, PayPal, Braintree) before bespoke builds; surface vendor lock-in, compliance, and cost. [oai_citation:2‡docs.stripe.com](mdc:https:/docs.stripe.com/billing/subscriptions/build-subscriptions?utm_source=chatgpt.com) [oai_citation:3‡stripe.com](mdc:https:/stripe.com/billing/features?utm_source=chatgpt.com)
+- **Performance & Scale**  
+  Call out hot paths (Big-O, DB load), caching, and eventual-consistency trade-offs. [oai_citation:4‡devcom.com](mdc:https:/devcom.com/tech-blog/successful-software-architecture-review-step-by-step-process/?utm_source=chatgpt.com)
+- **Security & Compliance**  
+  Highlight PCI, GDPR, SCA, and data-privacy implications for each option.
+- **Mentor Compatibility**  
+  If **@mentor-mode** or the phrase “explain more” is active, add layered explanations, analogies, and further-reading links.
+
+## Deliverables (in order)
+
+1. **Architecture Options** – 2-4 high-level strategies (e.g., “Native Stripe Checkout”, “Self-hosted + Stripe API”, “Full Marketplace platform”).
+2. **Comparison Matrix** (per option):
+   - Concept overview (≤ 2 sentences)
+   - Pros / Cons
+   - Scalability & performance notes (Big-O, DB hits, latency)
+   - Cost & vendor lock-in considerations
+   - Security / compliance impacts
+   - Operational complexity & observability
+   - Framework alignment (generators, packages, folder layout, etc.)
+3. **Conceptual Diagram**
+   - ASCII or Mermaid sketch of key components & data flow (≤ 30 lines, _illustrative only_).
+4. **Migration / Roll-out Plan**
+   - Phased approach (feature flags, canary releases, data backfill).
+5. **Open Questions** – what you still need from me.
+6. **Current Recommendation** – best fit given goals & constraints.
+
+## Conversation Rules
+
+- After delivering the six items above, **STOP and wait** for my reply.
+- Ask clarifying questions before refining options.
+- **Never** write or change code; this is architecture only.
+- Proceed to _investigation_ or _implementation_ only when I explicitly say so.
+
+_End of rule._

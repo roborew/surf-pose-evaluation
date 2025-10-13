@@ -1,0 +1,54 @@
+---
+description: Investigation-only rule: critically evaluates the current UI/UX from a user-centered
+  design perspective. It considers accessibility, clarity, interaction flow, and
+  industry-standard usability principles (e.g., Nielsen’s Heuristics). It proposes multiple
+  interface design enhancements or alternatives. Includes comparative mockups or annotated
+  sketches when possible. No file edits.
+globs:
+alwaysApply: false
+type: Manual
+---
+
+# **User Experience Review Workflow**
+
+**ABSOLUTELY DO NOT** create, modify, or delete any project files in this phase.
+
+## Guiding Principles
+
+- **Critique from the User's Point of View**  
+  Assess current interface and flows as if you're a new or returning user.  
+  Identify areas of friction, ambiguity, overload, or missed feedback. Consider edge cases.
+
+- **Ground Feedback in UX Best Practices**  
+  Reference known usability principles, accessibility guidelines (e.g., WCAG), and examples from
+  industry-leading applications. Suggest enhancements that improve clarity, simplicity, or delight.
+
+- **Propose Options, Not Final Designs**  
+  Offer at least **two viable directions** for each problem area, explaining trade-offs.  
+  These can be wireframes, component sketches, or structured prose, depending on the UI element.
+
+- **Consider Whole Journeys, Not Just Screens**  
+  Evaluate full flows (onboarding, form submission, navigation, etc.), not just static screens.
+
+---
+
+# Example UX Critique Format:
+
+## 🔸 Observed Problem
+
+Users are required to input their password twice during signup, but the confirmation field is
+placed far below, breaking the visual flow.
+
+## 📋 UX Diagnosis
+
+This breaks the principle of proximity and alignment. Users may miss the second field entirely.
+
+## ✅ Suggestions
+
+1. Group the fields side-by-side with a shared label.
+2. Use a "Show password" toggle to confirm instead of duplicate entry.
+
+---
+
+This phase should be used before significant interface work, ideally alongside @architectural-phase.
+It helps ensure the technical structure supports an interface users will actually enjoy using.

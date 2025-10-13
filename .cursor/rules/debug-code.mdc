@@ -1,0 +1,84 @@
+---
+description: Two-phase DEBUG workflow for every defect raised.
+globs:
+alwaysApply: false
+type: Manual
+---
+
+# Approach:
+
+① Examination Phase (“Diagnose”)
+• **No code changes** in the repo.  
+ • The agent analyses error logs, stack traces, failing tests,
+recent commits, and relevant ENV/config values.
+• Confirm the most obvious things first depending on the issue
+i.e if its a javascript issue has the code be compile. If the page
+is not loading is the server running. Confirm as much information as possible
+before starting your analysis.
+• Produces a **Debug Report** that includes:  
+ – Likely root-causes ranked by probability  
+ – Specific things for the human reviewer to inspect
+(e.g. “Confirm ENV['REDIS_URL'] matches staging”,
+“Set a breakpoint at OrdersController#create, line 42”)  
+ – Suggested break-point locations or logging patches  
+ – Any external docs/RFC links that clarify behaviour  
+ • Stops and waits for **“Confirm diagnosis”**.
+② Fix Phase (“Apply”)
+• Proposes a minimal, test-driven fix—code samples allowed,
+but **MUST NOT** alter files yet.  
+ • Lists tests that _should_ fail before the fix and pass after.  
+ • Pauses for **“Approve fix plan”**.
+③ Implementation Phase (“Code”) – after approval
+• Follows strict micro-TDD:
+
+1.  Add failing test(s)
+2.  Write minimal code to pass
+3.  Refactor for DRY/SOLID & style guides  
+     • Keeps suite green & linters clean at each pause.  
+     • Seeks explicit **“Ship it”** before final merge.
+    • Strictly follow principles: KISS, YAGNI, DRY, SOLID, CLEAN CODE, etc.
+
+# 🐞 Debug-First Workflow
+
+## 0️⃣ Trigger
+
+_Any new failing test, error report, or “bug” label invokes this rule._
+
+## 1️⃣ Examination Phase (Diagnose)
+
+1. Gather evidence (logs, traces, ENV, recent diffs).
+2. **Debug Report** → ranked hypotheses + next-steps checklist.
+3. ↪︎ _Wait for_ **“Confirm diagnosis”**.
+
+## 2️⃣ Fix Phase (Apply)
+
+1. Draft minimal remedy + test strategy (no file changes).
+2. Outline risk, rollback, and perf impact.
+3. ↪︎ _Wait for_ **“Approve fix plan”**.
+
+## 3️⃣ Implementation Phase (Code)
+
+_Repeat micro-TDD slices until the bug is fixed._
+
+| Slice step               | Limits (LOC) |
+| ------------------------ | ------------ |
+| Failing test diff        | ≤ 40         |
+| Passing code diff        | ≤ 80         |
+| Optional refactor        | ≤ 40         |
+| Explanation + commit msg | concise      |
+
+_Pause after every slice for “Apply slice N”._
+
+## 4️⃣ Finalise
+
+_Run full suite, lint, perf check → present results → wait for_ **“Ship it”**.
+
+## Conversation Rules
+
+1. Never modify repo files in phases ① or ②.
+2. Ask clarifying questions whenever context is ambiguous.
+3. Cite docs only in explanations when they truly aid understanding.
+4. Use ≤ 200 changed LOC per commit during Phase ③.
+5. Keep terminology consistent: **Diagnose → Apply → Code → Ship**.
+
+_End of rule._
