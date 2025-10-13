@@ -516,6 +516,56 @@ class ConsensusEvaluator:
         model_confidence_scores = []
         model_person_counts = []
 
+        def _normalize_confidence_values(raw_values: List[Any]) -> List[float]:
+            normalized = []
+            for value in raw_values or []:
+                if value is None:
+                    continue
+                try:
+                    numeric_value = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if not np.isfinite(numeric_value):
+                    continue
+                if numeric_value < 0.0:
+                    numeric_value = 0.0
+                elif numeric_value > 1.0:
+                    numeric_value = 1.0
+                normalized.append(numeric_value)
+            return normalized
+
+        def _collect_normalized_confidences(frame_predictions: List[Dict[str, Any]]):
+            confidences: List[float] = []
+            for frame in frame_predictions:
+                persons = frame.get("persons", []) or []
+                for person in persons:
+                    confidences.extend(
+                        _normalize_confidence_values(person.get("scores", []))
+                    )
+
+                    keypoints = person.get("keypoints", []) or []
+                    for keypoint in keypoints:
+                        if isinstance(keypoint, dict):
+                            confidences.extend(
+                                _normalize_confidence_values(
+                                    [keypoint.get("confidence")]
+                                )
+                            )
+                        elif isinstance(keypoint, (list, tuple)) and len(keypoint) >= 3:
+                            confidences.extend(
+                                _normalize_confidence_values([keypoint[2]])
+                            )
+            return confidences
+
+        def _difference_similarity(
+            model_value: float, ref_value: float, scale: float
+        ) -> float:
+            if scale <= 0:
+                scale = 1.0
+            delta = abs(model_value - ref_value)
+            normalized_delta = min(1.0, delta / scale)
+            return 1.0 - normalized_delta
+
         for i, maneuver in enumerate(maneuvers):
             if i < len(model_predictions):
                 model_pred_data = model_predictions[i]
@@ -532,42 +582,14 @@ class ConsensusEvaluator:
                     model_detection_rates.append(detection_rate)
 
                     # Calculate average confidence for this maneuver
-                    all_confidences = []
-                    total_persons = 0
-                    for frame in frame_predictions:
-                        persons = frame.get("persons", [])
-                        total_persons += len(persons)
-                        for person in persons:
-                            # Try person-level scores first (some models)
-                            scores = person.get("scores", [])
-                            if scores and hasattr(scores, "__iter__"):
-                                try:
-                                    all_confidences.extend(
-                                        [
-                                            float(s)
-                                            for s in scores
-                                            if isinstance(s, (int, float))
-                                        ]
-                                    )
-                                except (ValueError, TypeError):
-                                    pass
-
-                            # Also extract keypoint-level confidence scores (most models)
-                            keypoints = person.get("keypoints", [])
-                            if keypoints:
-                                for keypoint in keypoints:
-                                    if isinstance(keypoint, dict):
-                                        confidence = keypoint.get("confidence")
-                                        if confidence is not None:
-                                            try:
-                                                all_confidences.append(
-                                                    float(confidence)
-                                                )
-                                            except (ValueError, TypeError):
-                                                pass
+                    all_confidences = _collect_normalized_confidences(frame_predictions)
+                    total_persons = sum(
+                        len(frame.get("persons", []) or [])
+                        for frame in frame_predictions
+                    )
 
                     avg_confidence = (
-                        np.mean(all_confidences) if all_confidences else 0.0
+                        float(np.mean(all_confidences)) if all_confidences else 0.0
                     )
                     model_confidence_scores.append(avg_confidence)
                     model_person_counts.append(total_persons / len(frame_predictions))
@@ -598,42 +620,16 @@ class ConsensusEvaluator:
                             )
                             ref_detection_rates.append(ref_detection_rate)
 
-                            ref_all_confidences = []
-                            ref_total_persons = 0
-                            for frame in ref_frame_predictions:
-                                persons = frame.get("persons", [])
-                                ref_total_persons += len(persons)
-                                for person in persons:
-                                    # Try person-level scores first (some models)
-                                    scores = person.get("scores", [])
-                                    if scores and hasattr(scores, "__iter__"):
-                                        try:
-                                            ref_all_confidences.extend(
-                                                [
-                                                    float(s)
-                                                    for s in scores
-                                                    if isinstance(s, (int, float))
-                                                ]
-                                            )
-                                        except (ValueError, TypeError):
-                                            pass
-
-                                    # Also extract keypoint-level confidence scores (most models)
-                                    keypoints = person.get("keypoints", [])
-                                    if keypoints:
-                                        for keypoint in keypoints:
-                                            if isinstance(keypoint, dict):
-                                                confidence = keypoint.get("confidence")
-                                                if confidence is not None:
-                                                    try:
-                                                        ref_all_confidences.append(
-                                                            float(confidence)
-                                                        )
-                                                    except (ValueError, TypeError):
-                                                        pass
+                            ref_all_confidences = _collect_normalized_confidences(
+                                ref_frame_predictions
+                            )
+                            ref_total_persons = sum(
+                                len(frame.get("persons", []) or [])
+                                for frame in ref_frame_predictions
+                            )
 
                             ref_avg_confidence = (
-                                np.mean(ref_all_confidences)
+                                float(np.mean(ref_all_confidences))
                                 if ref_all_confidences
                                 else 0.0
                             )
@@ -669,20 +665,19 @@ class ConsensusEvaluator:
         ref_avg_persons = np.mean(ref_person_counts) if ref_person_counts else 0.0
 
         # Calculate consensus accuracy (how similar model is to reference consensus)
-        if ref_avg_detection > 0:
-            detection_similarity = min(model_avg_detection / ref_avg_detection, 2.0)
-        else:
-            detection_similarity = 1.0 if model_avg_detection == 0 else 0.0
+        detection_similarity = _difference_similarity(
+            model_avg_detection, ref_avg_detection, scale=1.0
+        )
 
-        if ref_avg_confidence > 0:
-            confidence_similarity = min(model_avg_confidence / ref_avg_confidence, 2.0)
-        else:
-            confidence_similarity = 1.0 if model_avg_confidence == 0 else 0.0
+        confidence_similarity = _difference_similarity(
+            model_avg_confidence, ref_avg_confidence, scale=1.0
+        )
 
-        if ref_avg_persons > 0:
-            person_similarity = min(model_avg_persons / ref_avg_persons, 2.0)
-        else:
-            person_similarity = 1.0 if model_avg_persons == 0 else 0.0
+        person_similarity = _difference_similarity(
+            model_avg_persons,
+            ref_avg_persons,
+            scale=max(ref_avg_persons, model_avg_persons, 1.0),
+        )
 
         # Overall consensus PCK (average of similarities)
         consensus_pck = (
