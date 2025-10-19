@@ -329,6 +329,38 @@ class SurfingDataLoader:
                 return path_part.replace("SD_02_SURF_FOOTAGE_PREPT/", "")
         return None
 
+    def _parse_session_dir_name(
+        self, session_dir_name: str
+    ) -> Tuple[str, Optional[str]]:
+        """Split a session directory name into base session and optional variant suffix."""
+
+        if not session_dir_name.startswith("SESSION"):
+            return session_dir_name, None
+
+        parts = session_dir_name.split("_")
+        if len(parts) <= 2:
+            return session_dir_name, None
+
+        base_session = "_".join(parts[:2])
+        variant = "_".join(parts[2:]) if len(parts) > 2 else None
+        return base_session, variant or None
+
+    def _iter_session_variant_dirs(self, camera_dir: Path):
+        """Yield session directories with their base name and variant info."""
+
+        for session_dir in sorted(camera_dir.iterdir()):
+            if not session_dir.is_dir():
+                continue
+
+            base_session, variant = self._parse_session_dir_name(session_dir.name)
+            if not base_session.startswith("SESSION"):
+                logger.debug(
+                    f"Skipping directory {session_dir} (does not look like a session folder)"
+                )
+                continue
+
+            yield session_dir, base_session, variant
+
     def _extract_zoom_info(self, video_path: Path) -> Tuple[str, str]:
         """
         Extract zoom level and base clip ID from video filename.
@@ -392,15 +424,12 @@ class SurfingDataLoader:
             camera_name = camera_dir.name
             logger.info(f"Discovering clips for camera: {camera_name}")
 
-            for session_dir in camera_dir.iterdir():
-                if not session_dir.is_dir():
-                    continue
-
-                session_name = session_dir.name
-
+            for session_dir, session_base, _ in self._iter_session_variant_dirs(
+                camera_dir
+            ):
                 for video_file in session_dir.glob(file_extension):
                     zoom_level, base_clip_id = self._extract_zoom_info(video_file)
-                    group_key = f"{camera_name}_{session_name}_{base_clip_id}"
+                    group_key = f"{camera_name}_{session_base}_{base_clip_id}"
                     zoom_groups[group_key][zoom_level].append(video_file)
 
         # Second pass: Select clips with annotations using balanced zoom distribution
@@ -484,10 +513,15 @@ class SurfingDataLoader:
                     # Extract camera and session from path
                     path_parts = selected_file.relative_to(clips_path).parts
                     camera = path_parts[0]
-                    session = path_parts[1]
+                    session_variant = path_parts[1]
+                    session_base, _ = self._parse_session_dir_name(session_variant)
 
                     clip = self._create_video_clip(
-                        selected_file, camera, session, video_format, selected_zoom
+                        selected_file,
+                        camera,
+                        session_base,
+                        video_format,
+                        selected_zoom,
                     )
                     if clip and clip.annotations:  # Only add clips with annotations
                         selected_clips.append(clip)
@@ -594,19 +628,15 @@ class SurfingDataLoader:
             _, base_clip_id = self._extract_zoom_info(video_path)
             video_id = f"{camera}_{session}_{video_path.stem}"
 
-            # Get relative path for annotation lookup
-            relative_path = str(video_path.relative_to(self.base_path))
-
-            # For annotation lookup, we always use the base clip name (without zoom suffix)
-            # because annotations are stored for base clips only
-            parent_dir = str(video_path.parent.relative_to(self.base_path))
+            # For annotation lookup, always use the canonical session folder
+            parent_dir = f"03_CLIPPED/{format}/{camera}/{session}"
             base_filename = f"{base_clip_id}.mp4"  # Always .mp4 for annotation lookup
 
             if format == "ffv1":
                 # For FFV1 format, map to corresponding H.264 path for annotation lookup
-                # e.g., "03_CLIPPED/ffv1/SONY_300/SESSION_060325" -> "03_CLIPPED/h264/SONY_300/SESSION_060325"
-                h264_dir = parent_dir.replace("03_CLIPPED/ffv1/", "03_CLIPPED/h264/")
-                annotation_lookup_path = f"{h264_dir}/{base_filename}"
+                annotation_lookup_path = (
+                    f"03_CLIPPED/h264/{camera}/{session}/{base_filename}"
+                )
             else:
                 # For H.264 format, use base clip name in same directory
                 annotation_lookup_path = f"{parent_dir}/{base_filename}"
