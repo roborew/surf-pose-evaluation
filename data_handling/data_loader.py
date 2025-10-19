@@ -288,11 +288,28 @@ class SurfingDataLoader:
                 with open(json_file, "r") as f:
                     data = json.load(f)
                     for item in data:
-                        video_url = item["video_url"]
+                        video_url = item.get("video_url") or item.get("data", {}).get(
+                            "video_url"
+                        )
+                        if not video_url:
+                            logger.warning(
+                                "Annotation item missing video URL in %s", json_file
+                            )
+                            continue
+
                         # Extract video file path from URL
                         video_file = self._extract_video_path_from_url(video_url)
-                        if video_file:
-                            annotations[video_file] = item["tricks"]
+                        if not video_file:
+                            continue
+
+                        # Legacy format: annotations stored directly under "tricks"
+                        legacy_tricks = item.get("tricks")
+
+                        if legacy_tricks is None:
+                            legacy_tricks = self._convert_labelstudio_annotations(item)
+
+                        if legacy_tricks:
+                            annotations[video_file] = legacy_tricks
 
         # Load SONY_70 annotations
         sony_70_path = labels_path / self.annotations_config["sony_70_labels"]
@@ -302,10 +319,25 @@ class SurfingDataLoader:
                 with open(json_file, "r") as f:
                     data = json.load(f)
                     for item in data:
-                        video_url = item["video_url"]
+                        video_url = item.get("video_url") or item.get("data", {}).get(
+                            "video_url"
+                        )
+                        if not video_url:
+                            logger.warning(
+                                "Annotation item missing video URL in %s", json_file
+                            )
+                            continue
+
                         video_file = self._extract_video_path_from_url(video_url)
-                        if video_file:
-                            annotations[video_file] = item["tricks"]
+                        if not video_file:
+                            continue
+
+                        legacy_tricks = item.get("tricks")
+                        if legacy_tricks is None:
+                            legacy_tricks = self._convert_labelstudio_annotations(item)
+
+                        if legacy_tricks:
+                            annotations[video_file] = legacy_tricks
 
         self.annotations_data = annotations
         logger.info(f"Loaded annotations for {len(annotations)} video files")
@@ -329,10 +361,8 @@ class SurfingDataLoader:
 
         # New remote Label Studio format: s3://training-data/video/<format>/...
         if video_url.startswith("s3://"):
-            # Drop scheme and bucket
             without_scheme = video_url[5:]
             if "/" in without_scheme:
-                # e.g. training-data/video/h264/SONY_300/SESSION_...
                 _, _, key_path = without_scheme.partition("/")
             else:
                 key_path = ""
@@ -344,7 +374,16 @@ class SurfingDataLoader:
 
             for remote_prefix, local_prefix in prefix_map.items():
                 if key_path.startswith(remote_prefix):
-                    return local_prefix + key_path[len(remote_prefix) :]
+                    mapped = local_prefix + key_path[len(remote_prefix) :]
+                    # Normalize session directories (remove variant suffixes like _WIDE)
+                    parts = mapped.split("/")
+                    if len(parts) >= 5:
+                        session_idx = 4  # 03_CLIPPED/<fmt>/<camera>/<session>/...
+                        session_name = parts[session_idx]
+                        base_session, _ = self._parse_session_dir_name(session_name)
+                        parts[session_idx] = base_session
+                        mapped = "/".join(parts)
+                    return mapped
 
             logger.warning("Unable to map S3 video URL to local path: %s", video_url)
 
@@ -881,6 +920,80 @@ class SurfingDataLoader:
             )
 
         return np.array(frames)
+
+    def _convert_labelstudio_annotations(self, item: Dict) -> Optional[List[Dict]]:
+        """Convert new Label Studio export format into legacy 'tricks' list."""
+
+        results = []
+
+        for annotation in item.get("annotations", []):
+            maneuver_entries = {}
+
+            for result in annotation.get("result", []):
+                res_type = result.get("type")
+                from_name = result.get("from_name")
+                value = result.get("value", {})
+
+                if res_type == "labels" and from_name in {"tricks", "maneuver"}:
+                    start = value.get("start")
+                    end = value.get("end")
+                    labels = value.get("labels", [])
+
+                    if not labels:
+                        continue
+
+                    maneuver_id = result.get("id")
+                    if not maneuver_id:
+                        maneuver_id = f"{start}_{end}_{labels[0]}"
+
+                    entry = maneuver_entries.setdefault(
+                        maneuver_id,
+                        {
+                            "id": maneuver_id,
+                            "start": start,
+                            "end": end,
+                            "labels": [],
+                            "score": None,
+                        },
+                    )
+
+                    entry["labels"].extend(labels)
+
+                elif res_type == "choices" and from_name == "exec_score":
+                    choices = value.get("choices", [])
+                    if choices:
+                        related_id = result.get("id")
+                        if related_id in maneuver_entries:
+                            maneuver_entries[related_id]["score"] = choices[0]
+                        else:
+                            entry = maneuver_entries.setdefault(
+                                related_id,
+                                {
+                                    "id": related_id,
+                                    "start": value.get("start"),
+                                    "end": value.get("end"),
+                                    "labels": [],
+                                    "score": choices[0],
+                                },
+                            )
+
+            for entry in maneuver_entries.values():
+                labels = entry.get("labels", [])
+                if not labels:
+                    continue
+
+                score = entry.get("score") or ""
+                maneuver_type = labels[-1]
+
+                results.append(
+                    {
+                        "start": entry.get("start", 0.0),
+                        "end": entry.get("end", 0.0),
+                        "labels": [score, maneuver_type],
+                    }
+                )
+
+        return results if results else None
 
 
 def main():
