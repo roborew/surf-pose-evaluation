@@ -321,12 +321,33 @@ class SurfingDataLoader:
         Returns:
             Relative path to video file or None if invalid
         """
-        # URL format: /data/local-files/?d=SD_02_SURF_FOOTAGE_PREPT/03_CLIPPED/h264/SONY_300/SESSION_060325/C0019_clip_1.mp4
+        # Old local Label Studio format: /data/local-files/?d=SD_02_SURF_FOOTAGE_PREPT/03_CLIPPED/h264/...
         if "?d=" in video_url:
             path_part = video_url.split("?d=")[1]
-            # Remove the base data path prefix to get relative path
             if path_part.startswith("SD_02_SURF_FOOTAGE_PREPT/"):
                 return path_part.replace("SD_02_SURF_FOOTAGE_PREPT/", "")
+
+        # New remote Label Studio format: s3://training-data/video/<format>/...
+        if video_url.startswith("s3://"):
+            # Drop scheme and bucket
+            without_scheme = video_url[5:]
+            if "/" in without_scheme:
+                # e.g. training-data/video/h264/SONY_300/SESSION_...
+                _, _, key_path = without_scheme.partition("/")
+            else:
+                key_path = ""
+
+            prefix_map = {
+                "video/h264/": "03_CLIPPED/h264/",
+                "video/ffv1/": "03_CLIPPED/ffv1/",
+            }
+
+            for remote_prefix, local_prefix in prefix_map.items():
+                if key_path.startswith(remote_prefix):
+                    return local_prefix + key_path[len(remote_prefix) :]
+
+            logger.warning("Unable to map S3 video URL to local path: %s", video_url)
+
         return None
 
     def _parse_session_dir_name(
