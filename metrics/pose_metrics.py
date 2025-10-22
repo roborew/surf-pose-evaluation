@@ -827,3 +827,208 @@ class PoseMetrics:
             mask[kpt_idx] = self._is_keypoint_valid(gt, person_idx, kpt_idx)
 
         return mask
+
+    def calculate_metrics_with_consensus(
+        self,
+        predictions: List[Dict],
+        consensus_annotations,  # ConsensusManeuver or List[ConsensusFrame]
+        quality_filter,  # AdaptiveQualityFilter
+        current_trial: int = 0,
+        total_trials: int = 50,
+    ) -> Dict[str, float]:
+        """
+        Calculate PCK metrics using consensus pseudo-ground-truth.
+
+        Applies adaptive percentile filtering to consensus keypoints based on
+        quality scores, then calculates PCK against filtered consensus.
+
+        Args:
+            predictions: Model predictions (list of dicts with 'keypoints')
+            consensus_annotations: Consensus maneuver or frames with pseudo-GT
+            quality_filter: AdaptiveQualityFilter instance for threshold selection
+            current_trial: Current Optuna trial number
+            total_trials: Total number of Optuna trials
+
+        Returns:
+            Dictionary with PCK metrics and consensus quality info
+        """
+        # Extract consensus frames
+        if hasattr(consensus_annotations, "frames"):
+            consensus_frames = consensus_annotations.frames
+        else:
+            consensus_frames = consensus_annotations
+
+        # Get adaptive percentile for current trial phase
+        percentile = quality_filter.get_trial_phase_percentile(
+            current_trial, total_trials
+        )
+
+        pck_scores = []
+        coverage_ratios = []
+        thresholds_used = []
+
+        # Process each frame
+        for frame_idx, (pred, consensus_frame) in enumerate(
+            zip(predictions, consensus_frames)
+        ):
+            if not hasattr(consensus_frame, "consensus_keypoints"):
+                continue
+
+            # Get consensus keypoints and quality scores
+            consensus_kpts = consensus_frame.consensus_keypoints
+            quality_scores = consensus_frame.quality_scores
+
+            if len(consensus_kpts) == 0 or len(quality_scores) == 0:
+                continue
+
+            # Apply percentile filtering
+            filtered_kpts, filtered_scores, threshold = (
+                quality_filter.filter_by_percentile(
+                    consensus_kpts, quality_scores, percentile=percentile
+                )
+            )
+
+            if len(filtered_kpts) == 0:
+                continue
+
+            # Extract predicted keypoints
+            pred_kpts = pred.get("keypoints", np.array([]))
+            if len(pred_kpts) == 0:
+                continue
+
+            # Take first person if multiple detected
+            if len(pred_kpts.shape) == 3:
+                pred_kpts = pred_kpts[0]
+
+            # Ensure 2D coordinates
+            if pred_kpts.shape[-1] > 2:
+                pred_kpts = pred_kpts[:, :2]
+            if filtered_kpts.shape[-1] > 2:
+                filtered_kpts = filtered_kpts[:, :2]
+
+            # Calculate PCK for this frame
+            frame_pck = self._calculate_pck_frame(
+                pred_kpts, filtered_kpts, threshold=0.2
+            )
+
+            if frame_pck is not None:
+                pck_scores.append(frame_pck)
+                coverage_ratios.append(len(filtered_kpts) / len(consensus_kpts))
+                thresholds_used.append(threshold)
+
+        # Aggregate metrics
+        if pck_scores:
+            return {
+                "pck_0_2": float(np.mean(pck_scores)),
+                "pck_0_1": float(
+                    np.mean(
+                        [
+                            self._calculate_pck_frame(
+                                (
+                                    predictions[i].get("keypoints", np.array([]))[
+                                        0, :, :2
+                                    ]
+                                    if len(
+                                        predictions[i].get("keypoints", np.array([]))
+                                    )
+                                    > 0
+                                    else np.array([])
+                                ),
+                                (
+                                    consensus_frames[i].consensus_keypoints[:, :2]
+                                    if hasattr(
+                                        consensus_frames[i], "consensus_keypoints"
+                                    )
+                                    else np.array([])
+                                ),
+                                threshold=0.1,
+                            )
+                            or 0
+                            for i in range(min(len(predictions), len(consensus_frames)))
+                        ]
+                    )
+                ),
+                "pck_0_5": float(
+                    np.mean(
+                        [
+                            self._calculate_pck_frame(
+                                (
+                                    predictions[i].get("keypoints", np.array([]))[
+                                        0, :, :2
+                                    ]
+                                    if len(
+                                        predictions[i].get("keypoints", np.array([]))
+                                    )
+                                    > 0
+                                    else np.array([])
+                                ),
+                                (
+                                    consensus_frames[i].consensus_keypoints[:, :2]
+                                    if hasattr(
+                                        consensus_frames[i], "consensus_keypoints"
+                                    )
+                                    else np.array([])
+                                ),
+                                threshold=0.5,
+                            )
+                            or 0
+                            for i in range(min(len(predictions), len(consensus_frames)))
+                        ]
+                    )
+                ),
+                "consensus_coverage": float(np.mean(coverage_ratios)),
+                "quality_threshold_used": float(np.mean(thresholds_used)),
+                "percentile_used": float(percentile),
+                "num_valid_frames": len(pck_scores),
+            }
+        else:
+            return {
+                "pck_0_2": 0.0,
+                "pck_0_1": 0.0,
+                "pck_0_5": 0.0,
+                "consensus_coverage": 0.0,
+                "quality_threshold_used": 0.0,
+                "percentile_used": float(percentile),
+                "num_valid_frames": 0,
+            }
+
+    def _calculate_pck_frame(
+        self,
+        pred_keypoints: np.ndarray,
+        gt_keypoints: np.ndarray,
+        threshold: float = 0.2,
+    ) -> Optional[float]:
+        """
+        Calculate PCK for a single frame.
+
+        Args:
+            pred_keypoints: Predicted keypoints (K, 2)
+            gt_keypoints: Ground truth keypoints (K, 2)
+            threshold: PCK threshold
+
+        Returns:
+            PCK score [0, 1] or None if invalid
+        """
+        if len(pred_keypoints) == 0 or len(gt_keypoints) == 0:
+            return None
+
+        # Match keypoint dimensions
+        min_kpts = min(len(pred_keypoints), len(gt_keypoints))
+        pred_keypoints = pred_keypoints[:min_kpts]
+        gt_keypoints = gt_keypoints[:min_kpts]
+
+        # Calculate normalizer (head segment or torso diagonal)
+        normalizer = self._calculate_normalizer(gt_keypoints)
+
+        if normalizer <= 0:
+            return None
+
+        # Calculate distances
+        distances = np.linalg.norm(pred_keypoints - gt_keypoints, axis=1)
+        normalized_distances = distances / normalizer
+
+        # PCK: fraction of keypoints within threshold
+        correct = normalized_distances < threshold
+        pck = np.mean(correct)
+
+        return float(pck)

@@ -3,6 +3,17 @@
 # managed by RunManager when using run_production_evaluation.py. They are organized in
 # timestamped folders under results/runs/{timestamp}_{name}/.
 
+# Consensus Configuration - Reference shared consensus config
+consensus_config: "configs/consensus_config.yaml"
+
+# Optuna Validation Settings
+optuna_validation:
+  use_consensus: true # Use consensus-based validation instead of detection metrics
+  num_clips: 75
+  cameras:
+    - "SONY_300"
+    - "SONY_70"
+
 # Data Source Configuration - Production paths with FFV1 format
 data_source:
   base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"
@@ -57,7 +68,7 @@ optuna:
   enabled: true
   study_name: "surf_pose_optimization_production"
   direction: "maximize" # Maximize PCK accuracy
-  n_trials: 200 # Thorough optimization
+  n_trials: 50 # Reduced to prevent validation overfitting
   timeout_minutes: 300 # 5 hours max per model
   sampler: "TPESampler"
   pruner: "MedianPruner"

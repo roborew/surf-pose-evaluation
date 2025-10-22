@@ -3,6 +3,17 @@
 # managed by RunManager when using run_production_evaluation.py. They are organized in
 # timestamped folders under results/runs/{timestamp}_{name}/.
 
+# Consensus Configuration - Reference shared consensus config
+consensus_config: "configs/consensus_config.yaml"
+
+# Comparison Validation Settings
+comparison_validation:
+  use_consensus: true # Use consensus-based validation for model comparison
+  num_clips: 200
+  cameras:
+    - "SONY_300"
+    - "SONY_70"
+
 # Data Source Configuration - Production paths with FFV1 format
 data_source:
   base_data_path: "./data/SD_02_SURF_FOOTAGE_PREPT"

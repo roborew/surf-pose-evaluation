@@ -16,6 +16,8 @@ import mlflow
 import optuna
 
 from utils.pose_evaluator import PoseEvaluator
+from utils.consensus_generator import ConsensusLoader
+from utils.quality_filter import AdaptiveQualityFilter
 
 
 class OptunaPoseOptimizer:
@@ -39,6 +41,16 @@ class OptunaPoseOptimizer:
                 "plateau_threshold": 0.95,  # Consider plateaued if within 95% of best
             },
         )
+
+        # Initialize consensus-based validation
+        self.use_consensus = config.get("optuna_validation", {}).get(
+            "use_consensus", False
+        )
+        self.consensus_data = None
+        self.quality_filter = None
+
+        if self.use_consensus:
+            self._initialize_consensus_validation()
 
     def optimize_model(
         self, model_name: str, maneuvers: List, memory_profiler=None
@@ -93,25 +105,32 @@ class OptunaPoseOptimizer:
                 print(f"\n🔄 Trial {trial.number:03d}: {param_summary}")
                 print(f"   • Using {len(maneuvers)} pre-selected maneuvers")
 
-                for i, maneuver in enumerate(maneuvers):
-                    try:
-                        maneuver_metrics = self.evaluator._process_video_maneuver(
-                            model, maneuver, model_name
-                        )
-                        if maneuver_metrics["pose"]:
-                            pck_score = maneuver_metrics["pose"].get("pck_0_2", 0)
-                            trial_metrics.append(pck_score)
-
-                        if (i + 1) % 5 == 0:
-                            print(
-                                f"   • Processed {i + 1}/{len(maneuvers)} maneuvers..."
+                # Use consensus-based validation if available
+                if self.use_consensus and self.consensus_data:
+                    trial_metrics = self._evaluate_with_consensus(
+                        model, model_name, maneuvers, trial.number
+                    )
+                else:
+                    # Fallback to detection metrics (legacy/broken approach)
+                    for i, maneuver in enumerate(maneuvers):
+                        try:
+                            maneuver_metrics = self.evaluator._process_video_maneuver(
+                                model, maneuver, model_name
                             )
+                            if maneuver_metrics["pose"]:
+                                pck_score = maneuver_metrics["pose"].get("pck_0_2", 0)
+                                trial_metrics.append(pck_score)
 
-                    except Exception as e:
-                        logging.warning(
-                            f"Failed to process maneuver in trial {trial.number}: {e}"
-                        )
-                        continue
+                            if (i + 1) % 5 == 0:
+                                print(
+                                    f"   • Processed {i + 1}/{len(maneuvers)} maneuvers..."
+                                )
+
+                        except Exception as e:
+                            logging.warning(
+                                f"Failed to process maneuver in trial {trial.number}: {e}"
+                            )
+                            continue
 
                 # Calculate trial score
                 trial_score = np.mean(trial_metrics) if trial_metrics else 0
@@ -463,3 +482,178 @@ USAGE RECOMMENDATIONS:
         except Exception as e:
             logging.error(f"Failed to save best parameters: {e}")
             return False
+
+    def _initialize_consensus_validation(self):
+        """Initialize consensus-based validation system."""
+        logging.info("Initializing consensus-based validation...")
+
+        # Load consensus configuration
+        consensus_config_path = self.config.get("consensus_config")
+        if consensus_config_path:
+            with open(consensus_config_path, "r") as f:
+                consensus_config = yaml.safe_load(f)
+        else:
+            consensus_config = self.config.get("consensus", {})
+
+        # Initialize quality filter
+        weights = consensus_config.get("quality_filter", {}).get(
+            "composite_weights", {}
+        )
+        schedule = consensus_config.get("quality_filter", {}).get(
+            "percentile_schedule", {}
+        )
+
+        self.quality_filter = AdaptiveQualityFilter(
+            w_confidence=weights.get("confidence", 0.4),
+            w_stability=weights.get("stability", 0.4),
+            w_completeness=weights.get("completeness", 0.2),
+            initialization_percentile=schedule.get("initialization", 70.0),
+            growth_percentile=schedule.get("growth", 80.0),
+            saturation_percentile=schedule.get("saturation", 75.0),
+        )
+
+        # Load pre-generated consensus data
+        cache_path = consensus_config.get("generation", {}).get(
+            "cache_path", "./data/consensus_cache"
+        )
+        optuna_consensus_path = Path(cache_path) / "optuna_validation"
+
+        if not optuna_consensus_path.exists():
+            logging.warning(f"Consensus data not found at {optuna_consensus_path}")
+            logging.warning(
+                "Falling back to detection metrics. Run: python scripts/generate_consensus.py"
+            )
+            self.use_consensus = False
+            return
+
+        try:
+            self.consensus_data = ConsensusLoader.load(
+                str(optuna_consensus_path), validation_type="optuna_validation"
+            )
+            logging.info(
+                f"✅ Loaded consensus data: {len(self.consensus_data.clips)} clips"
+            )
+        except Exception as e:
+            logging.error(f"Failed to load consensus data: {e}")
+            logging.warning("Falling back to detection metrics")
+            self.use_consensus = False
+
+    def _get_consensus_for_model(self, model_name: str):
+        """
+        Get leave-one-out consensus for specific model.
+
+        If model is in consensus generation set, exclude it.
+        Otherwise, use full consensus.
+        """
+        if not self.consensus_data:
+            return None
+
+        # Check if this model was excluded during consensus generation
+        if self.consensus_data.excluded_model == model_name:
+            # This is the model we're optimizing, use LOO consensus
+            return self.consensus_data
+
+        # For models not in consensus set (mediapipe, blazepose),
+        # use the full consensus from all three models
+        return self.consensus_data
+
+    def _evaluate_with_consensus(
+        self, model, model_name: str, maneuvers: List, trial_number: int
+    ) -> List[float]:
+        """
+        Evaluate model using consensus pseudo-ground-truth.
+
+        Args:
+            model: Initialized model instance
+            model_name: Model name
+            maneuvers: List of maneuvers to evaluate
+            trial_number: Current trial number for adaptive percentile
+
+        Returns:
+            List of PCK scores for each maneuver
+        """
+        trial_metrics = []
+        total_trials = self.config.get("optuna", {}).get("n_trials", 50)
+
+        # Get total number of trials for adaptive percentile
+        n_trials = self.config.get("optuna", {}).get("n_trials", 50)
+
+        print(
+            f"   • Using consensus-based validation (trial {trial_number}/{n_trials})"
+        )
+
+        for i, maneuver in enumerate(maneuvers):
+            try:
+                # Run model inference on maneuver frames
+                predictions = []
+
+                # Get maneuver video frames
+                import cv2
+
+                cap = cv2.VideoCapture(str(maneuver.video_path))
+
+                # Skip to maneuver start
+                cap.set(cv2.CAP_PROP_POS_FRAMES, maneuver.start_frame)
+
+                # Extract frames for this maneuver
+                for frame_idx in range(maneuver.start_frame, maneuver.end_frame):
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    # Run model prediction
+                    result = model.predict(frame)
+                    predictions.append(result)
+
+                cap.release()
+
+                if not predictions:
+                    continue
+
+                # Get consensus annotation for this maneuver
+                consensus_maneuver = self._get_consensus_maneuver(maneuver.maneuver_id)
+
+                if consensus_maneuver is None:
+                    logging.debug(
+                        f"No consensus found for maneuver {maneuver.maneuver_id}"
+                    )
+                    continue
+
+                # Calculate PCK using consensus
+                metrics = self.evaluator.pose_metrics.calculate_metrics_with_consensus(
+                    predictions=predictions,
+                    consensus_annotations=consensus_maneuver,
+                    quality_filter=self.quality_filter,
+                    current_trial=trial_number,
+                    total_trials=n_trials,
+                )
+
+                pck_score = metrics.get("pck_0_2", 0)
+                trial_metrics.append(pck_score)
+
+                if (i + 1) % 5 == 0:
+                    print(
+                        f"   • Processed {i + 1}/{len(maneuvers)} maneuvers "
+                        f"(avg PCK: {np.mean(trial_metrics):.3f})..."
+                    )
+
+            except Exception as e:
+                logging.warning(
+                    f"Failed to process maneuver in trial {trial_number}: {e}"
+                )
+                continue
+
+        return trial_metrics
+
+    def _get_consensus_maneuver(self, maneuver_id: str):
+        """Find consensus data for specific maneuver."""
+        if not self.consensus_data:
+            return None
+
+        # Search through all clips for matching maneuver
+        for clip_id, maneuvers in self.consensus_data.clips.items():
+            for maneuver in maneuvers:
+                if maneuver.maneuver_id == maneuver_id:
+                    return maneuver
+
+        return None
