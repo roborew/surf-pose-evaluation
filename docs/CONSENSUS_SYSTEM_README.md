@@ -1,5 +1,11 @@
 # Consensus-Based Optuna Optimization System
 
+> **🚀 Quick Start:** See [`CONSENSUS_QUICKSTART.md`](./CONSENSUS_QUICKSTART.md) for simple usage instructions.
+>
+> This document contains technical implementation details for reference.
+
+---
+
 ## Overview
 
 This document describes the consensus-based pseudo-ground-truth system implemented to fix broken Optuna hyperparameter optimization for surf pose estimation.
@@ -19,7 +25,7 @@ Implemented research-validated consensus-based pseudo-ground-truth generation:
 1. **Multi-model consensus**: Generate high-quality pseudo-GT from YOLOv8-Pose, PyTorch Pose (RTMPose), and MMPose
 2. **Adaptive quality filtering**: Use percentile-based filtering with composite scores (confidence + stability + completeness)
 3. **Leave-one-out validation**: Prevent circular reasoning by excluding model being optimized from its own consensus
-4. **Session-level data splitting**: Prevent data leakage by keeping FULL/WIDE/standard variants together
+4. **Separate validation sets**: Prevent data leakage by using completely separate clips for Optuna (75) and comparison (200)
 
 ## Architecture
 
@@ -27,10 +33,10 @@ Implemented research-validated consensus-based pseudo-ground-truth generation:
 
 ```
 utils/
-├── session_analyzer.py          # Analyze sessions, select best for consensus
 ├── quality_filter.py            # Adaptive percentile quality filtering
 ├── consensus_generator.py       # Generate consensus pseudo-ground-truth
-└── optuna_optimizer.py          # Modified to use consensus validation
+├── optuna_optimizer.py          # Modified to use consensus validation
+└── data_selection_manager.py    # Selects validation clips (existing)
 
 metrics/
 └── pose_metrics.py              # Extended with consensus-based PCK calculation
@@ -40,40 +46,40 @@ configs/
 ├── evaluation_config_production_optuna.yaml      # References consensus config
 └── evaluation_config_production_comparison.yaml  # References consensus config
 
-scripts/
-└── generate_consensus.py        # Standalone consensus generation script
+run_evaluation.py                # Integrated consensus generation
 ```
 
 ### Data Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   1. Session Analysis                        │
-│  Analyze all sessions → Select best SONY_300 for consensus  │
-│  Split remaining sessions: 50% Optuna, 50% Comparison       │
+│            1. Data Selection (Automatic)                     │
+│  DataSelectionManager selects:                               │
+│    - 75 clips for Optuna validation                          │
+│    - 200 clips for comparison testing (no overlap)           │
 └────────────────────────────┬────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────┐
 │              2. Consensus Generation (Upfront)               │
-│  Run YOLOv8 + PyTorch Pose + MMPose on consensus session    │
+│  Run YOLOv8 + PyTorch Pose + MMPose on validation clips     │
 │  → Compute quality scores (confidence + stability + comp.)   │
 │  → Apply percentile filtering → Generate consensus keypoints │
-│  → Save to cache with leave-one-out variants                 │
+│  → Save separate GT for Optuna and comparison to cache      │
 └────────────────────────────┬────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────┐
 │              3. Optuna Optimization (Per Model)              │
 │  For model X:                                                 │
-│    - Load consensus from models Y & Z (leave-one-out)        │
+│    - Load consensus GT from 75 validation clips              │
 │    - Sample hyperparameters                                   │
-│    - Run inference                                            │
-│    - Calculate PCK against consensus (adaptive percentile)   │
+│    - Run inference on same 75 clips                          │
+│    - Calculate PCK against consensus GT                      │
 │    - Repeat for 50 trials                                     │
 └────────────────────────────┬────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────┐
-│           4. Comparison Testing (Larger Dataset)             │
-│  Use optimized parameters + consensus on 200 clips           │
+│           4. Comparison Testing (Separate Dataset)           │
+│  Use optimized parameters + consensus GT from 200 clips      │
 │  → Final model comparison with reliable PCK scores           │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -81,21 +87,19 @@ scripts/
 ### Data Splits (No Leakage)
 
 ```
-Total Sessions:
-├── Consensus Set (1 session, SONY_300 only)
-│   └── SESSION_070325 (43 clips, ~150 maneuvers)
-│       - Used to generate pseudo-GT
-│       - NEVER used for evaluation
+Total Clips:
+├── Optuna Validation Set (75 clips)
+│   └── SONY_300 + SONY_70
+│       - Used to generate Optuna consensus GT
+│       - Used for hyperparameter tuning
 │
-├── Optuna Validation Set (~50% of remaining)
-│   └── SONY_300 + SONY_70 clips
-│       - Different sessions from consensus
-│       - Used for hyperparameter tuning (75 clips)
-│
-└── Comparison Test Set (~50% of remaining)
-    └── SONY_300 + SONY_70 clips
-        - Different sessions from both consensus AND Optuna
-        - Used for final model comparison (200 clips)
+└── Comparison Test Set (200 clips)
+    └── SONY_300 + SONY_70
+        - Completely separate from Optuna set
+        - Used to generate comparison consensus GT
+        - Used for final model comparison
+
+Key principle: Zero overlap between Optuna and comparison sets
 ```
 
 **Session Grouping**: FULL/WIDE/standard variants of same session stay together to prevent leakage.
@@ -359,11 +363,57 @@ Research foundations:
 - `_calculate_detection_metrics_without_ground_truth()` usage in Optuna (lines 96-103)
 - Broken PCK fallback to 0
 
+## File Organization
+
+**All consensus artifacts are stored in their own run directory, just like Optuna runs.**
+
+Each consensus generation creates a timestamped run folder:
+
+```
+.../results/runs/{timestamp}_consensus_gen_v1/
+├── consensus_cache/              # Pseudo-ground-truth annotations
+├── consensus_quality_reports/    # Quality metrics
+├── session_analysis_report.txt   # Session analysis
+└── consensus_info.json          # Run metadata
+```
+
+Optuna runs reference a specific consensus run via config:
+
+```yaml
+optuna_validation:
+  consensus_run_path: ".../runs/20251022_120000_consensus_gen_v1"
+```
+
+**No files are created in the project root.**
+
+See [`docs/CONSENSUS_ARCHITECTURE_CONFIRMED.md`](./CONSENSUS_ARCHITECTURE_CONFIRMED.md) for complete workflow.
+
+## Cleanup Old Files
+
+If you have old artifacts in your project root from previous implementations:
+
+```bash
+# Navigate to project root
+cd surf-pose-evaluation/
+
+# Remove old artifacts (safe to delete - from old implementation)
+rm -rf predictions/                    # Should be in run dirs
+rm -rf consensus_cache/                # Should be in run dirs
+rm -rf consensus_quality_reports/      # Should be in run dirs
+rm consensus_predictions_*.json        # Old format
+rm session_analysis_report.txt         # Should be in run dirs
+
+# Verify project root is clean
+ls -la . | grep -E "predictions|consensus"
+# Should return nothing - all data is in run directories
+```
+
 ## Support
 
 For issues or questions:
 
-1. Check logs in `results/runs/{timestamp}/logs/`
-2. Review consensus quality reports in `results/consensus_quality_reports/`
-3. Verify data splits have no leakage
-4. Ensure all dependencies installed (opencv-python, tqdm, numpy, etc.)
+1. **Check run logs**: `.../results/runs/{timestamp}_{name}/logs/`
+2. **Review consensus quality**: `.../results/runs/{timestamp}_consensus_*/consensus_quality_reports/`
+3. **View MLflow metrics**: `mlflow ui --backend-store-uri file://.../runs/{timestamp}_{name}/mlflow_tracking`
+4. **Verify data splits**: Check `consensus_info.json` in consensus run directory
+5. **Dependencies**: Ensure opencv-python, tqdm, numpy, etc. are installed

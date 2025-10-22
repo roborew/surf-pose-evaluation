@@ -13,6 +13,9 @@ comparison_validation:
   cameras:
     - "SONY_300"
     - "SONY_70"
+  # Specify which consensus run to use (path to run directory with consensus_cache)
+  # If null, will look for consensus in current run or most recent consensus run
+  consensus_run_path: null
 
 # Data Source Configuration - Production paths with FFV1 format
 data_source:

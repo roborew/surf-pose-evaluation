@@ -22,6 +22,8 @@ from utils.run_manager import RunManager
 from utils.pose_evaluator import PoseEvaluator
 from utils.optuna_optimizer import OptunaPoseOptimizer
 from utils.memory_profiler import MemoryProfiler
+from utils.consensus_generator import ConsensusGenerator
+from utils.quality_filter import AdaptiveQualityFilter
 
 
 def parse_arguments():
@@ -1542,6 +1544,129 @@ def main():
             logger.info(
                 f"📖 Visualization manifest ready: {Path(visualization_manifest_path).name}"
             )
+
+        # Phase 0: Generate Consensus GT (if needed)
+        consensus_cache_path = None
+
+        # Check if either phase needs consensus
+        needs_consensus = False
+        optuna_config_check = None
+        comparison_config_check = None
+
+        if not args.skip_optuna and not args.comparison_only:
+            with open(args.config, "r") as f:
+                optuna_config_check = yaml.safe_load(f)
+            needs_consensus = optuna_config_check.get("optuna_validation", {}).get(
+                "use_consensus", False
+            )
+
+        if not args.skip_comparison and not args.optuna_only:
+            with open(args.comparison_config, "r") as f:
+                comparison_config_check = yaml.safe_load(f)
+            needs_consensus = needs_consensus or comparison_config_check.get(
+                "comparison_validation", {}
+            ).get("use_consensus", False)
+
+        if needs_consensus:
+            logger.info("=" * 80)
+            logger.info("GENERATING CONSENSUS PSEUDO-GROUND-TRUTH")
+            logger.info("=" * 80)
+
+            # Load consensus config
+            consensus_config_path = (
+                optuna_config_check or comparison_config_check
+            ).get("consensus_config", "configs/consensus_config.yaml")
+            with open(consensus_config_path, "r") as f:
+                consensus_config = yaml.safe_load(f)
+
+            # Setup paths in run directory
+            consensus_cache_dir = run_manager.run_dir / "consensus_cache"
+
+            # Initialize quality filter
+            weights = consensus_config["consensus"]["quality_filter"][
+                "composite_weights"
+            ]
+            schedule = consensus_config["consensus"]["quality_filter"][
+                "percentile_schedule"
+            ]
+            quality_filter = AdaptiveQualityFilter(
+                w_confidence=weights["confidence"],
+                w_stability=weights["stability"],
+                w_completeness=weights["completeness"],
+                initialization_percentile=schedule["initialization"],
+                growth_percentile=schedule["growth"],
+                saturation_percentile=schedule["saturation"],
+            )
+
+            # Initialize consensus generator
+            consensus_models = consensus_config["consensus"]["generation"][
+                "consensus_models"
+            ]
+            generator = ConsensusGenerator(
+                consensus_models=consensus_models,
+                quality_filter=quality_filter,
+                cache_path=str(consensus_cache_dir),
+                config=consensus_config,
+            )
+
+            # Generate consensus for Optuna clips
+            if optuna_maneuvers and not args.skip_optuna and not args.comparison_only:
+                logger.info(
+                    f"Generating consensus GT for {len(optuna_maneuvers)} Optuna clips..."
+                )
+                try:
+                    optuna_consensus = generator.generate_consensus_annotations(
+                        clips=optuna_maneuvers,
+                        output_path=str(consensus_cache_dir / "optuna_validation"),
+                        dataset_type="optuna_validation",
+                    )
+                    logger.info(f"✅ Generated consensus for Optuna validation")
+                except Exception as e:
+                    logger.error(f"❌ Failed to generate Optuna consensus: {e}")
+                    import traceback
+
+                    logger.error(traceback.format_exc())
+
+            # Generate consensus for comparison clips
+            if (
+                comparison_maneuvers
+                and not args.skip_comparison
+                and not args.optuna_only
+            ):
+                logger.info(
+                    f"Generating consensus GT for {len(comparison_maneuvers)} comparison clips..."
+                )
+                try:
+                    comparison_consensus = generator.generate_consensus_annotations(
+                        clips=comparison_maneuvers,
+                        output_path=str(consensus_cache_dir / "comparison_test"),
+                        dataset_type="comparison_test",
+                    )
+                    logger.info(f"✅ Generated consensus for comparison testing")
+                except Exception as e:
+                    logger.error(f"❌ Failed to generate comparison consensus: {e}")
+                    import traceback
+
+                    logger.error(traceback.format_exc())
+
+            # Update configs to point to this run's consensus
+            run_dir_str = str(run_manager.run_dir)
+            if (
+                optuna_config_check
+                and not args.skip_optuna
+                and not args.comparison_only
+            ):
+                optuna_config_check["optuna_validation"][
+                    "consensus_run_path"
+                ] = run_dir_str
+            if (
+                comparison_config_check
+                and not args.skip_comparison
+                and not args.optuna_only
+            ):
+                comparison_config_check["comparison_validation"][
+                    "consensus_run_path"
+                ] = run_dir_str
 
         # Phase 1: Optuna Optimization
         if not args.skip_optuna and not args.comparison_only:

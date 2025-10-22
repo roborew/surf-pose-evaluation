@@ -6,23 +6,21 @@ Implementation completed for consensus-based pseudo-ground-truth system to fix b
 
 ## What Was Implemented
 
-### 1. Session Analysis & Selection ✅
+### 1. Data Selection ✅
 
-**File**: `utils/session_analyzer.py`
+**File**: `utils/data_selection_manager.py` (existing)
 
-- Analyzes all SONY_300 and SONY_70 sessions
-- Counts clips, maneuvers, classes, execution scores per session
-- Recommends best SONY_300 session for consensus generation
-- Splits remaining sessions for Optuna (50%) and comparison (50%)
-- Ensures FULL/WIDE/standard variants stay together
-- Prevents data leakage between splits
+- Selects validation clips (75 for Optuna, 200 for comparison)
+- Ensures no overlap between Optuna and comparison sets
+- Uses existing session-level grouping to prevent data leakage
+- Maintains consistent clip selection across runs
 
 **Key Features**:
 
-- Session-level grouping (extracts base name from variants)
-- Quality scoring (maneuver count + diversity + execution scores)
-- Reproducible splitting with random seed
-- Detailed analysis reports
+- Integration with existing data selection system
+- No separate "consensus session" - uses validation clips directly
+- Reproducible selection with random seed
+- Clean separation between validation sets
 
 ### 2. Adaptive Quality Filter ✅
 
@@ -48,13 +46,12 @@ Implementation completed for consensus-based pseudo-ground-truth system to fix b
 
 **File**: `utils/consensus_generator.py`
 
-- Runs multiple models (YOLOv8, PyTorch Pose, MMPose) on consensus session
+- Runs multiple models (YOLOv8, PyTorch Pose, MMPose) on validation clips
 - Generates confidence-weighted mean of keypoint predictions
 - Applies quality filtering with adaptive percentiles
 - Saves consensus as structured JSON with per-frame data
 - Supports leave-one-out consensus generation
-- Includes data leakage verification
-- Generates consensus for both Optuna and comparison validation sets
+- Generates separate consensus for Optuna and comparison validation sets
 
 **Key Features**:
 
@@ -128,26 +125,26 @@ Changes:
 - Reduced Optuna trials from 200 → 50 to prevent overfitting
 - Specified camera selection for each validation phase
 
-### 8. Consensus Generation Script ✅
+### 8. Pipeline Integration ✅
 
-**File**: `scripts/generate_consensus.py`
+**File**: `run_evaluation.py` (modified)
 
-Standalone script that:
+Integrated consensus generation into main pipeline:
 
-1. Analyzes sessions
-2. Recommends consensus session
-3. Updates config with session assignments
-4. Generates consensus for Optuna validation
-5. Generates consensus for comparison testing
-6. Verifies no data leakage
+1. Automatically detects if consensus is needed
+2. Selects validation clips via DataSelectionManager
+3. Generates consensus GT upfront
+4. Runs Optuna with consensus data
+5. Runs comparison with separate consensus data
+6. All artifacts saved to run directory
 
 **Usage**:
 
 ```bash
-python scripts/generate_consensus.py --config configs/consensus_config.yaml
-python scripts/generate_consensus.py --force  # Regenerate even if exists
-python scripts/generate_consensus.py --analyze-only  # Just analyze
+python run_evaluation.py --run-name "my_experiment"  # Automatic
 ```
+
+**Note**: `scripts/generate_consensus.py` is deprecated
 
 ### 9. Documentation ✅
 
@@ -160,34 +157,32 @@ python scripts/generate_consensus.py --analyze-only  # Just analyze
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                    Session Analyzer                           │
-│  • Parses SONY_300/70 annotation JSONs                       │
-│  • Extracts session base names (handles FULL/WIDE variants)  │
-│  • Calculates quality scores                                  │
-│  • Recommends best session for consensus                      │
-│  • Splits remaining for Optuna/comparison                     │
+│              Data Selection Manager                           │
+│  • Selects 75 clips for Optuna validation                   │
+│  • Selects 200 clips for comparison (no overlap)            │
+│  • Ensures session-level grouping (no data leakage)         │
 └────────────────────────┬─────────────────────────────────────┘
                          │
                          ▼
 ┌──────────────────────────────────────────────────────────────┐
 │                 Consensus Generator                           │
 │  • Loads YOLOv8 + PyTorch Pose + MMPose                      │
-│  • Runs inference on consensus session frames                │
+│  • Runs inference on validation clips                        │
 │  • Computes quality scores per keypoint                      │
 │  • Applies AdaptiveQualityFilter                             │
 │  • Generates confidence-weighted consensus                    │
-│  • Saves with leave-one-out variants                         │
+│  • Saves separate GT for Optuna and comparison               │
 └────────────────────────┬─────────────────────────────────────┘
                          │
                          ▼
 ┌──────────────────────────────────────────────────────────────┐
 │                 Optuna Optimizer                              │
-│  • Loads pre-generated consensus data                        │
+│  • Loads pre-generated consensus data (75 clips)            │
 │  • Initializes AdaptiveQualityFilter                         │
 │  • For each trial:                                           │
 │    - Sample hyperparameters                                   │
-│    - Run inference                                            │
-│    - Calculate PCK against consensus (with filtering)        │
+│    - Run inference on validation clips                       │
+│    - Calculate PCK against consensus GT                      │
 │    - Log to MLflow                                            │
 │  • Leave-one-out: exclude model from own consensus           │
 └────────────────────────┬─────────────────────────────────────┘
@@ -236,13 +231,14 @@ python scripts/generate_consensus.py --analyze-only  # Just analyze
 - 50 trials sufficient for parameter tuning
 - Prevents exhaustive search that memorizes validation patterns
 
-### 5. Why Session-Level Grouping?
+### 5. Why Separate Validation Sets?
 
 **Prevents data leakage**:
 
-- FULL/WIDE/standard are same surfer, same wave, same conditions
-- If variants split across sets → model sees same content in train and test
-- Session grouping ensures complete isolation
+- Optuna clips (75) used for parameter tuning
+- Comparison clips (200) used for final testing
+- No overlap between sets ensures unbiased final evaluation
+- DataSelectionManager handles session-level grouping automatically
 
 ## Integration with Existing Code
 
@@ -319,23 +315,17 @@ else:
 
 ### Current Limitations
 
-1. **Clip Loading Not Integrated**:
-
-   - `load_clips_for_sessions()` is placeholder
-   - Needs integration with DataSelectionManager
-   - Currently uses maneuver objects passed from main pipeline
-
-2. **Fixed Composite Weights**:
+1. **Fixed Composite Weights**:
 
    - Weights (0.4/0.4/0.2) not tuned for surf footage
    - Could benefit from ablation studies
 
-3. **No Per-Class Percentiles**:
+2. **No Per-Class Percentiles**:
 
    - All maneuver types use same threshold
    - Research shows per-class normalization helps with imbalanced data
 
-4. **No Multi-View Support**:
+3. **No Multi-View Support**:
    - Multi-camera data not synchronized/timecoded
    - Could use triangulation for higher quality GT
 
@@ -366,19 +356,13 @@ else:
 ### Immediate (Required)
 
 1. ✅ Complete implementation (DONE)
-2. ⏳ Run session analysis:
+2. ⏳ Test with one model:
    ```bash
-   python scripts/generate_consensus.py --analyze-only
+   python run_evaluation.py --run-optuna --run-name "test_consensus"
    ```
-3. ⏳ Generate consensus data:
-   ```bash
-   python scripts/generate_consensus.py
-   ```
-4. ⏳ Test with one model:
-   ```bash
-   python run_evaluation.py --run-optuna --eval-mode quick_test
-   ```
-5. ⏳ Verify PCK scores are meaningful (not 0)
+3. ⏳ Verify consensus generation completes successfully
+4. ⏳ Verify PCK scores are meaningful (not 0)
+5. ⏳ Check MLflow shows PCK improvement across trials
 
 ### Short-Term (Recommended)
 

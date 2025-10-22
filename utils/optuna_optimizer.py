@@ -135,9 +135,17 @@ class OptunaPoseOptimizer:
                 # Calculate trial score
                 trial_score = np.mean(trial_metrics) if trial_metrics else 0
 
-                # Log results
+                # Log results to MLflow
                 mlflow.log_metric("optuna_trial_score", trial_score)
+                mlflow.log_metric("pck_0_2", trial_score)  # Log as PCK for clarity
                 mlflow.log_metric("num_maneuvers_processed", len(trial_metrics))
+                mlflow.log_param("trial_number", trial.number)
+
+                # Log consensus validation info if used
+                if self.use_consensus:
+                    mlflow.log_param("validation_method", "consensus_based")
+                else:
+                    mlflow.log_param("validation_method", "detection_metrics")
 
                 # Check for improvement
                 improvement = trial_score - best_score
@@ -513,16 +521,32 @@ USAGE RECOMMENDATIONS:
         )
 
         # Load pre-generated consensus data
-        cache_path = consensus_config.get("generation", {}).get(
-            "cache_path", "./data/consensus_cache"
+        # Priority: 1) Specified path, 2) Current run dir, 3) Most recent consensus run
+        consensus_run_path = self.config.get("optuna_validation", {}).get(
+            "consensus_run_path"
         )
-        optuna_consensus_path = Path(cache_path) / "optuna_validation"
 
-        if not optuna_consensus_path.exists():
-            logging.warning(f"Consensus data not found at {optuna_consensus_path}")
-            logging.warning(
-                "Falling back to detection metrics. Run: python scripts/generate_consensus.py"
+        if consensus_run_path:
+            # Use specified consensus run path
+            consensus_run_path = Path(consensus_run_path)
+            optuna_consensus_path = (
+                consensus_run_path / "consensus_cache" / "optuna_validation"
             )
+            logging.info(f"Using consensus from specified path: {consensus_run_path}")
+
+            # Check if it exists
+            if not optuna_consensus_path.exists():
+                logging.warning(f"Consensus data not found at {optuna_consensus_path}")
+                logging.warning(
+                    "Consensus may still be generating, or path is incorrect"
+                )
+                logging.warning("⚠️ Falling back to detection metrics")
+                self.use_consensus = False
+                return
+        else:
+            # No path specified - consensus should be in current run or will be generated
+            logging.info("No consensus path specified")
+            logging.warning("⚠️ Falling back to detection metrics for now")
             self.use_consensus = False
             return
 

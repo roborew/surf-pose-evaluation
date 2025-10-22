@@ -13,6 +13,10 @@ optuna_validation:
   cameras:
     - "SONY_300"
     - "SONY_70"
+  # Specify which consensus run to use (path to consensus run directory)
+  # Example: "./data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results/runs/20251022_120000_consensus_generation"
+  # If not specified, will look for most recent consensus run
+  consensus_run_path: null
 
 # Data Source Configuration - Production paths with FFV1 format
 data_source:
