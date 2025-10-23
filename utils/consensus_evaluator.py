@@ -708,7 +708,26 @@ class ConsensusEvaluator:
         """Save consensus predictions to file"""
         try:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
-            consensus_file = Path(f"consensus_predictions_{timestamp}.json")
+
+            # Use run_manager directory if available, otherwise temp location
+            if (
+                hasattr(self.pose_evaluator, "run_manager")
+                and self.pose_evaluator.run_manager
+            ):
+                consensus_dir = (
+                    self.pose_evaluator.run_manager.run_dir / "consensus_predictions"
+                )
+                consensus_dir.mkdir(parents=True, exist_ok=True)
+                consensus_file = (
+                    consensus_dir / f"consensus_predictions_{timestamp}.json"
+                )
+            else:
+                # Fallback to temp directory (not project root)
+                import tempfile
+
+                temp_dir = Path(tempfile.gettempdir()) / "surf_pose_consensus"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                consensus_file = temp_dir / f"consensus_predictions_{timestamp}.json"
 
             # Convert numpy arrays to lists for JSON serialization
             serializable_consensus = {}

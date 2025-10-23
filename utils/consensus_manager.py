@@ -122,10 +122,15 @@ class ConsensusManager:
         cache_file = self.cache_dir / f"{target_model}_{phase}_gt.json"
 
         if cache_file.exists():
+            print(f"   📦 Loading cached consensus from {cache_file.name}")
             logger.info(
                 f"Loading cached consensus for {target_model} from {cache_file.name}"
             )
             return self._load_from_cache(cache_file)
+
+        print(f"\n🔧 GENERATING CONSENSUS GT FOR {target_model.upper()}")
+        print(f"   Phase: {phase}")
+        print(f"   Maneuvers to process: {len(maneuvers)}")
 
         logger.info(
             f"Generating consensus GT for {target_model} ({phase} phase)\n"
@@ -134,6 +139,7 @@ class ConsensusManager:
 
         # Determine which models to use (leave-one-out)
         consensus_models = self.get_consensus_models_for_target(target_model)
+        print(f"   Consensus models: {', '.join(consensus_models)}")
 
         # Generate consensus for all maneuvers
         gt_data = {}
@@ -195,6 +201,12 @@ class ConsensusManager:
         self._save_to_cache(cache_file, gt_data, stats)
 
         # Log summary
+        print(f"\n✅ CONSENSUS GENERATION COMPLETE FOR {target_model.upper()}")
+        print(f"   Success: {stats['successful']}/{stats['total_maneuvers']} maneuvers")
+        print(f"   Total frames: {stats['total_frames']}")
+        print(f"   Avg confidence: {stats['avg_confidence']:.3f}")
+        print(f"   Cached to: {cache_file.name}\n")
+
         logger.info(
             f"✓ Consensus generation complete for {target_model}:\n"
             f"  Success: {stats['successful']}/{stats['total_maneuvers']} maneuvers\n"

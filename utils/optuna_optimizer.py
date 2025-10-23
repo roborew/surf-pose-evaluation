@@ -47,37 +47,70 @@ class OptunaPoseOptimizer:
         self.consensus_manager = None
         self.consensus_gt = None  # Cache for consensus ground truth
 
-        if self.use_consensus and run_manager:
-            logging.info("Consensus-based validation enabled for Optuna")
-            try:
-                from utils.consensus_manager import ConsensusManager
-                from utils.quality_filter import AdaptiveQualityFilter
-
-                # Initialize quality filter
-                quality_filter = AdaptiveQualityFilter(
-                    w_confidence=0.4, w_stability=0.4, w_completeness=0.2
-                )
-
-                # Initialize consensus manager
-                consensus_cache_dir = run_manager.run_dir / "consensus_cache"
-                self.consensus_manager = ConsensusManager(
-                    consensus_models=["yolov8", "pytorch_pose", "mmpose"],
-                    quality_filter=quality_filter,
-                    cache_dir=consensus_cache_dir,
-                )
-                logging.info("ConsensusManager initialized successfully")
-            except Exception as e:
-                logging.warning(
-                    f"Failed to initialize consensus validation: {e}. "
+        if self.use_consensus:
+            if not run_manager:
+                logging.error(
+                    "❌ Consensus validation enabled but run_manager not provided! "
                     "Falling back to detection metrics."
                 )
                 self.use_consensus = False
+            else:
+                logging.info("=" * 80)
+                logging.info("🎯 CONSENSUS-BASED VALIDATION ENABLED FOR OPTUNA")
+                logging.info("=" * 80)
+                try:
+                    from utils.consensus_manager import ConsensusManager
+                    from utils.quality_filter import AdaptiveQualityFilter
+
+                    # Initialize quality filter
+                    quality_filter = AdaptiveQualityFilter(
+                        w_confidence=0.4, w_stability=0.4, w_completeness=0.2
+                    )
+
+                    # Initialize consensus manager
+                    consensus_cache_dir = run_manager.run_dir / "consensus_cache"
+                    consensus_cache_dir.mkdir(parents=True, exist_ok=True)
+
+                    self.consensus_manager = ConsensusManager(
+                        consensus_models=["yolov8", "pytorch_pose", "mmpose"],
+                        quality_filter=quality_filter,
+                        cache_dir=consensus_cache_dir,
+                    )
+                    logging.info("✅ ConsensusManager initialized successfully")
+                    logging.info(f"   Cache directory: {consensus_cache_dir}")
+                    logging.info("=" * 80)
+                except ImportError as e:
+                    logging.error(
+                        f"❌ Failed to import consensus modules: {e}\n"
+                        f"   Check that utils/consensus_manager.py and utils/quality_filter.py exist.\n"
+                        f"   Falling back to detection metrics."
+                    )
+                    self.use_consensus = False
+                except Exception as e:
+                    logging.error(
+                        f"❌ Failed to initialize consensus validation: {e}\n"
+                        f"   Falling back to detection metrics.",
+                        exc_info=True,
+                    )
+                    self.use_consensus = False
 
     def optimize_model(
         self, model_name: str, maneuvers: List, memory_profiler=None
     ) -> Dict:
         """Run Optuna optimization for a single model with intelligent early stopping"""
         logging.info(f"Starting Optuna optimization for {model_name}")
+
+        # Reset consensus GT for this model
+        self.consensus_gt = None
+
+        # Log consensus status
+        if self.use_consensus:
+            logging.info(f"✅ Consensus validation: ENABLED")
+            logging.info(f"   Will use leave-one-out consensus for {model_name}")
+        else:
+            logging.warning(
+                f"⚠️  Consensus validation: DISABLED (using detection metrics)"
+            )
 
         # Set MLflow experiment name from config
         experiment_name = self.config.get("mlflow", {}).get(
@@ -128,8 +161,21 @@ class OptunaPoseOptimizer:
 
                 # Use consensus-based validation if available
                 if self.use_consensus and self.consensus_manager:
+                    print(f"\n{'='*60}")
+                    print(f"🎯 USING CONSENSUS-BASED VALIDATION")
+                    print(f"{'='*60}")
+
                     # Load consensus GT once (cached after first load)
                     if self.consensus_gt is None:
+                        consensus_models = (
+                            self.consensus_manager.get_consensus_models_for_target(
+                                model_name
+                            )
+                        )
+                        print(f"📊 Generating consensus GT for {model_name}")
+                        print(f"   Using models: {', '.join(consensus_models)}")
+                        print(f"   Processing {len(maneuvers)} maneuvers...")
+
                         logging.info(
                             f"Loading consensus GT for {model_name} (Optuna phase)"
                         )
@@ -140,14 +186,13 @@ class OptunaPoseOptimizer:
                                 phase="optuna",
                             )
                         )
+                        print(f"✅ Consensus GT loaded/generated")
+                        print(f"{'='*60}\n")
+
                         mlflow.log_param("validation_method", "consensus_based")
                         mlflow.log_param(
                             "consensus_models",
-                            ",".join(
-                                self.consensus_manager.get_consensus_models_for_target(
-                                    model_name
-                                )
-                            ),
+                            ",".join(consensus_models),
                         )
 
                     # Calculate PCK against consensus for each maneuver
