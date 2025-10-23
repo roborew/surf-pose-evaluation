@@ -738,6 +738,136 @@ class PoseMetrics:
 
         return intersection / union if union > 0 else 0.0
 
+    def calculate_pck_with_consensus_gt(
+        self,
+        predictions: List[Dict[str, Any]],
+        consensus_gt: Dict[str, Any],
+        maneuver_id: str,
+        threshold: float = 0.2,
+    ) -> Dict[str, float]:
+        """
+        Calculate PCK against consensus pseudo-ground-truth.
+
+        Used for Optuna optimization when no manual annotations exist.
+        Compares model predictions against consensus generated from other models.
+
+        Args:
+            predictions: Model predictions for maneuver frames
+                List of dicts with 'keypoints' and 'scores' keys
+            consensus_gt: Consensus ground truth data for this maneuver
+                Dict with 'frames' key containing consensus for each frame
+            maneuver_id: ID of the maneuver being evaluated
+            threshold: PCK threshold (default 0.2 for PCK@0.2)
+
+        Returns:
+            Dictionary with PCK metrics:
+            - pck_0_2: PCK score at threshold 0.2
+            - correct_keypoints: Number of correct keypoints
+            - total_keypoints: Total keypoints evaluated
+            - avg_distance: Average normalized distance
+        """
+        if maneuver_id not in consensus_gt:
+            return {
+                "pck_0_2": 0.0,
+                "correct_keypoints": 0,
+                "total_keypoints": 0,
+                "avg_distance": 0.0,
+                "error": "maneuver_not_in_consensus",
+            }
+
+        consensus_frames = consensus_gt[maneuver_id]["frames"]
+
+        if len(predictions) != len(consensus_frames):
+            # Frame count mismatch - try to align or return error
+            min_frames = min(len(predictions), len(consensus_frames))
+            predictions = predictions[:min_frames]
+            consensus_frames = consensus_frames[:min_frames]
+
+        correct_keypoints = 0
+        total_keypoints = 0
+        all_distances = []
+
+        for pred, gt_frame in zip(predictions, consensus_frames):
+            # Extract prediction keypoints (take first person if multiple)
+            if pred["num_persons"] == 0:
+                continue  # No detection in this frame
+
+            pred_kpts = pred["keypoints"][0]  # Shape: (17, 2)
+
+            # Extract consensus keypoints
+            gt_kpts = gt_frame["keypoints"]  # Shape: (17, 2)
+            gt_conf = gt_frame["confidence"]  # Shape: (17,)
+
+            # Only evaluate keypoints with sufficient consensus confidence
+            valid_mask = gt_conf > 0.5
+
+            if not valid_mask.any():
+                continue  # No valid keypoints in this frame
+
+            # Calculate distances
+            distances = np.linalg.norm(pred_kpts - gt_kpts, axis=-1)  # Shape: (17,)
+
+            # Normalize by torso diameter
+            torso_diameter = self._estimate_torso_diameter(gt_kpts)
+
+            if torso_diameter > 0:
+                normalized_distances = distances / torso_diameter
+            else:
+                # Fallback: normalize by image diagonal (assume 1920x1080)
+                normalized_distances = distances / np.sqrt(1920**2 + 1080**2)
+
+            # Check which keypoints are correct
+            correct = (normalized_distances < threshold) & valid_mask
+
+            correct_keypoints += correct.sum()
+            total_keypoints += valid_mask.sum()
+            all_distances.extend(normalized_distances[valid_mask].tolist())
+
+        # Calculate final metrics
+        pck = correct_keypoints / total_keypoints if total_keypoints > 0 else 0.0
+        avg_distance = np.mean(all_distances) if all_distances else 0.0
+
+        return {
+            "pck_0_2": float(pck),
+            "correct_keypoints": int(correct_keypoints),
+            "total_keypoints": int(total_keypoints),
+            "avg_distance": float(avg_distance),
+        }
+
+    def _estimate_torso_diameter(self, keypoints: np.ndarray) -> float:
+        """
+        Estimate torso diameter for PCK normalization.
+
+        Uses distance between shoulders and hips as proxy for torso size.
+
+        Args:
+            keypoints: Keypoint array, shape (17, 2)
+
+        Returns:
+            Estimated torso diameter in pixels
+        """
+        # COCO keypoint indices:
+        # 5-left_shoulder, 6-right_shoulder, 11-left_hip, 12-right_hip
+        left_shoulder = keypoints[5]
+        right_shoulder = keypoints[6]
+        left_hip = keypoints[11]
+        right_hip = keypoints[12]
+
+        # Calculate shoulder and hip widths
+        shoulder_width = np.linalg.norm(left_shoulder - right_shoulder)
+        hip_width = np.linalg.norm(left_hip - right_hip)
+
+        # Calculate torso height (average shoulder to hip distance)
+        left_torso_height = np.linalg.norm(left_shoulder - left_hip)
+        right_torso_height = np.linalg.norm(right_shoulder - right_hip)
+        torso_height = (left_torso_height + right_torso_height) / 2
+
+        # Torso diameter: diagonal of torso bounding box
+        avg_width = (shoulder_width + hip_width) / 2
+        torso_diameter = np.sqrt(avg_width**2 + torso_height**2)
+
+        return torso_diameter if torso_diameter > 0 else 100.0  # Fallback to 100 pixels
+
     def _calculate_normalizer(self, keypoints: np.ndarray) -> float:
         """Calculate normalization factor for PCK (head segment or torso diagonal)
 
