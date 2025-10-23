@@ -40,6 +40,39 @@ class OptunaPoseOptimizer:
             },
         )
 
+        # Consensus validation setup
+        self.use_consensus = config.get("optuna_validation", {}).get(
+            "use_consensus", False
+        )
+        self.consensus_manager = None
+        self.consensus_gt = None  # Cache for consensus ground truth
+
+        if self.use_consensus and run_manager:
+            logging.info("Consensus-based validation enabled for Optuna")
+            try:
+                from utils.consensus_manager import ConsensusManager
+                from utils.quality_filter import AdaptiveQualityFilter
+
+                # Initialize quality filter
+                quality_filter = AdaptiveQualityFilter(
+                    w_confidence=0.4, w_stability=0.4, w_completeness=0.2
+                )
+
+                # Initialize consensus manager
+                consensus_cache_dir = run_manager.run_dir / "consensus_cache"
+                self.consensus_manager = ConsensusManager(
+                    consensus_models=["yolov8", "pytorch_pose", "mmpose"],
+                    quality_filter=quality_filter,
+                    cache_dir=consensus_cache_dir,
+                )
+                logging.info("ConsensusManager initialized successfully")
+            except Exception as e:
+                logging.warning(
+                    f"Failed to initialize consensus validation: {e}. "
+                    "Falling back to detection metrics."
+                )
+                self.use_consensus = False
+
     def optimize_model(
         self, model_name: str, maneuvers: List, memory_profiler=None
     ) -> Dict:
@@ -93,32 +126,118 @@ class OptunaPoseOptimizer:
                 print(f"\n🔄 Trial {trial.number:03d}: {param_summary}")
                 print(f"   • Using {len(maneuvers)} pre-selected maneuvers")
 
-                for i, maneuver in enumerate(maneuvers):
-                    try:
-                        maneuver_metrics = self.evaluator._process_video_maneuver(
-                            model, maneuver, model_name
+                # Use consensus-based validation if available
+                if self.use_consensus and self.consensus_manager:
+                    # Load consensus GT once (cached after first load)
+                    if self.consensus_gt is None:
+                        logging.info(
+                            f"Loading consensus GT for {model_name} (Optuna phase)"
                         )
-                        if maneuver_metrics["pose"]:
-                            pck_score = maneuver_metrics["pose"].get("pck_0_2", 0)
-                            trial_metrics.append(pck_score)
+                        self.consensus_gt = (
+                            self.consensus_manager.generate_consensus_gt(
+                                maneuvers=maneuvers,
+                                target_model=model_name,
+                                phase="optuna",
+                            )
+                        )
+                        mlflow.log_param("validation_method", "consensus_based")
+                        mlflow.log_param(
+                            "consensus_models",
+                            ",".join(
+                                self.consensus_manager.get_consensus_models_for_target(
+                                    model_name
+                                )
+                            ),
+                        )
 
-                        if (i + 1) % 5 == 0:
-                            print(
-                                f"   • Processed {i + 1}/{len(maneuvers)} maneuvers..."
+                    # Calculate PCK against consensus for each maneuver
+                    from metrics.pose_metrics import PoseMetrics
+
+                    metrics_calc = PoseMetrics()
+
+                    for i, maneuver in enumerate(maneuvers):
+                        try:
+                            # Run inference on this maneuver
+                            predictions = []
+                            cap = __import__("cv2").VideoCapture(
+                                str(maneuver.file_path)
                             )
 
-                    except Exception as e:
-                        logging.warning(
-                            f"Failed to process maneuver in trial {trial.number}: {e}"
-                        )
-                        continue
+                            if maneuver.start_frame > 0:
+                                cap.set(
+                                    __import__("cv2").CAP_PROP_POS_FRAMES,
+                                    maneuver.start_frame,
+                                )
+
+                            frame_idx = maneuver.start_frame
+                            while cap.isOpened() and frame_idx < maneuver.end_frame:
+                                ret, frame = cap.read()
+                                if not ret:
+                                    break
+
+                                pred = model.predict(frame)
+                                predictions.append(pred)
+                                frame_idx += 1
+
+                            cap.release()
+
+                            # Calculate PCK against consensus
+                            pck_result = metrics_calc.calculate_pck_with_consensus_gt(
+                                predictions=predictions,
+                                consensus_gt=self.consensus_gt,
+                                maneuver_id=maneuver.maneuver_id,
+                                threshold=0.2,
+                            )
+
+                            if pck_result["pck_0_2"] > 0:
+                                trial_metrics.append(pck_result["pck_0_2"])
+
+                            if (i + 1) % 5 == 0:
+                                avg_so_far = (
+                                    np.mean(trial_metrics) if trial_metrics else 0.0
+                                )
+                                print(
+                                    f"   • Processed {i + 1}/{len(maneuvers)} maneuvers... "
+                                    f"(avg PCK: {avg_so_far:.3f})"
+                                )
+
+                        except Exception as e:
+                            logging.warning(
+                                f"Failed to process maneuver in trial {trial.number}: {e}"
+                            )
+                            continue
+                else:
+                    # Fallback to detection metrics (old behavior)
+                    mlflow.log_param("validation_method", "detection_metrics")
+
+                    for i, maneuver in enumerate(maneuvers):
+                        try:
+                            maneuver_metrics = self.evaluator._process_video_maneuver(
+                                model, maneuver, model_name
+                            )
+                            if maneuver_metrics["pose"]:
+                                pck_score = maneuver_metrics["pose"].get("pck_0_2", 0)
+                                trial_metrics.append(pck_score)
+
+                            if (i + 1) % 5 == 0:
+                                print(
+                                    f"   • Processed {i + 1}/{len(maneuvers)} maneuvers..."
+                                )
+
+                        except Exception as e:
+                            logging.warning(
+                                f"Failed to process maneuver in trial {trial.number}: {e}"
+                            )
+                            continue
 
                 # Calculate trial score
                 trial_score = np.mean(trial_metrics) if trial_metrics else 0
 
                 # Log results
                 mlflow.log_metric("optuna_trial_score", trial_score)
+                mlflow.log_metric("pck_0_2", trial_score)  # Explicit PCK logging
                 mlflow.log_metric("num_maneuvers_processed", len(trial_metrics))
+                mlflow.log_param("trial_number", trial.number)
 
                 # Check for improvement
                 improvement = trial_score - best_score

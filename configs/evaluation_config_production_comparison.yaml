@@ -57,6 +57,25 @@ evaluation:
 optuna:
   enabled: false # Disabled for comparison phase
 
+# Comparison Validation Configuration
+comparison_validation:
+  # Use consensus-based pseudo-ground-truth for validation
+  use_consensus: true
+
+  # Number of clips for comprehensive comparison
+  num_clips: 200
+
+  # Cameras to use (both for comprehensive testing)
+  cameras:
+    - SONY_300
+    - SONY_70
+
+  # Ensure no overlap with Optuna validation clips
+  exclude_optuna_clips: true
+
+# Consensus configuration reference
+consensus_config: configs/consensus_config.yaml
+
 # Predictions Configuration - ENABLED for final model comparison
 predictions:
   enabled: true

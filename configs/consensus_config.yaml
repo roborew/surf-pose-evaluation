@@ -1,0 +1,56 @@
+# Consensus-Based Validation Configuration
+# This config defines settings for generating pseudo-ground-truth from multiple models
+
+consensus:
+  # Strong models used for consensus generation
+  # These models will be run on validation clips to generate pseudo-GT
+  strong_models:
+    - yolov8
+    - pytorch_pose
+    - mmpose
+
+  # Weak models that will be optimized using consensus from strong models
+  weak_models:
+    - mediapipe
+    - blazepose
+
+  # Quality filter settings for pseudo-GT filtering
+  quality_filter:
+    # Composite quality score weights (must sum to 1.0)
+    weights:
+      confidence: 0.4 # Model's confidence in detection
+      stability: 0.4 # Temporal consistency across frames
+      completeness: 0.2 # Fraction of skeleton detected
+
+    # Adaptive percentile thresholds based on optimization progress
+    # Higher percentile = more selective filtering (keep only top N%)
+    percentile_schedule:
+      initialization: 70.0 # First 10% of trials: keep top 30% (conservative)
+      growth: 80.0 # Middle 60% of trials: keep top 20% (standard)
+      saturation: 75.0 # Final 30% of trials: keep top 25% (prevent overfitting)
+
+    # Minimum acceptable quality score (safety threshold)
+    min_quality_score: 0.3
+
+  # Leave-one-out validation settings
+  leave_one_out:
+    enabled: true
+    # When optimizing a strong model, exclude it from its own consensus
+    # When optimizing a weak model, use all strong models
+
+# Cache settings
+cache:
+  # Consensus predictions will be cached to speed up subsequent trials
+  enabled: true
+  # Cache directory is set by run_manager (runs/{name}/consensus_cache/)
+
+# Validation settings
+validation:
+  # Only use consensus keypoints with confidence above this threshold
+  confidence_threshold: 0.5
+
+  # PCK threshold for evaluating keypoint accuracy
+  pck_threshold: 0.2
+
+  # Normalization method for PCK calculation
+  normalization: "torso_diameter" # Options: torso_diameter, head_segment, bbox_diagonal

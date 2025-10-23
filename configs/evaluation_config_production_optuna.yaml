@@ -88,6 +88,32 @@ optuna:
       expected_trials: 35
       patience: 12
 
+# Optuna Validation Configuration
+optuna_validation:
+  # Use consensus-based pseudo-ground-truth for validation
+  use_consensus: true
+
+  # Number of clips for Optuna optimization
+  num_clips: 75
+
+  # Cameras to use for Optuna (focused on SONY_300 for quality)
+  cameras:
+    - SONY_300
+
+  # Ensure no overlap with comparison validation set
+  ensure_no_overlap_with_comparison: true
+
+# Models to optimize
+models_to_optimize:
+  - yolov8
+  - pytorch_pose
+  - mmpose
+  - mediapipe
+  - blazepose
+
+# Consensus configuration reference
+consensus_config: configs/consensus_config.yaml
+
 # Performance Configuration (Production optimized)
 performance:
   max_workers: 8 # Full utilization for production
