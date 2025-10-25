@@ -107,6 +107,11 @@ def parse_arguments():
         action="store_true",
         help="Run only model comparison phase (requires existing best parameters)",
     )
+    parser.add_argument(
+        "--consensus-params-file",
+        type=str,
+        help="YAML file with predetermined params for consensus models (yolov8, pytorch_pose, mmpose)",
+    )
 
     return parser.parse_args()
 
@@ -192,6 +197,92 @@ def get_clips_from_config(
     except Exception as e:
         logger.warning(f"⚠️ Failed to load config {config_path}: {e}")
         return None
+
+
+def load_consensus_params(args, config: Dict) -> Dict[str, Dict]:
+    """Load predetermined parameters for consensus model generation
+
+    Args:
+        args: Parsed command line arguments
+        config: Loaded configuration dictionary
+
+    Returns:
+        Dictionary mapping model names to their parameters
+        e.g., {"yolov8": {...}, "pytorch_pose": {...}, "mmpose": {...}}
+    """
+    logger = logging.getLogger(__name__)
+
+    consensus_models = ["yolov8", "pytorch_pose", "mmpose"]
+
+    # Priority 1: CLI argument --consensus-params-file
+    if args.consensus_params_file:
+        params_file = Path(args.consensus_params_file)
+        if params_file.exists():
+            logger.info(f"📄 Loading consensus params from CLI: {params_file}")
+            with open(params_file) as f:
+                params = yaml.safe_load(f)
+            # Validate that required models are present
+            if all(model in params for model in consensus_models):
+                return {model: params[model] for model in consensus_models}
+            else:
+                logger.warning(
+                    f"⚠️ Params file missing required models. Expected: {consensus_models}"
+                )
+
+    # Priority 2: Config file consensus_pregeneration section
+    pregen_config = config.get("consensus_pregeneration", {})
+    if pregen_config.get("enabled", True):
+        params_source = pregen_config.get("params_source", "best_params")
+
+        if params_source == "file" and pregen_config.get("params_file"):
+            params_file = Path(pregen_config["params_file"])
+            if params_file.exists():
+                logger.info(
+                    f"📄 Loading consensus params from config file: {params_file}"
+                )
+                with open(params_file) as f:
+                    params = yaml.safe_load(f)
+                if all(model in params for model in consensus_models):
+                    return {model: params[model] for model in consensus_models}
+
+        elif params_source == "best_params":
+            # Try to load from previous run
+            previous_run = pregen_config.get("previous_run_path")
+            if previous_run:
+                best_params_file = (
+                    Path(previous_run) / "best_params" / "best_parameters.yaml"
+                )
+                if best_params_file.exists():
+                    logger.info(
+                        f"📄 Loading consensus params from previous run: {best_params_file}"
+                    )
+                    with open(best_params_file) as f:
+                        params = yaml.safe_load(f)
+                    if all(model in params for model in consensus_models):
+                        return {model: params[model] for model in consensus_models}
+                    else:
+                        logger.warning(
+                            f"⚠️ Previous run params missing required models: {list(params.keys())}"
+                        )
+
+    # Priority 3: Model defaults from model_configs
+    logger.info(
+        "📄 Loading consensus params from model defaults (no predetermined params found)"
+    )
+    default_params = {}
+    for model_name in consensus_models:
+        model_config_path = Path(f"configs/model_configs/{model_name}.yaml")
+        if model_config_path.exists():
+            with open(model_config_path) as f:
+                model_config = yaml.safe_load(f)
+            # Extract default parameters from config
+            default_params[model_name] = model_config.get("default_parameters", {})
+            logger.info(f"  ✓ Loaded defaults for {model_name}")
+        else:
+            logger.warning(f"  ✗ No config found for {model_name}, using empty params")
+            default_params[model_name] = {}
+
+    return default_params
 
 
 def resolve_clip_counts(
@@ -298,7 +389,11 @@ def validate_parameters(args) -> tuple[list[str], list[str]]:
 
 
 def run_optuna_phase(
-    run_manager: RunManager, args, optuna_maneuvers: List, memory_profiler=None
+    run_manager: RunManager,
+    args,
+    optuna_maneuvers: List,
+    memory_profiler=None,
+    precomputed_predictions=None,
 ) -> Dict:
     """Run Optuna optimization phase with pre-selected data and dynamic time allocation"""
     logger = logging.getLogger(__name__)
@@ -334,6 +429,11 @@ def run_optuna_phase(
 
     # Initialize optimizer with pre-selected data
     optimizer = OptunaPoseOptimizer(config, run_manager)
+
+    # Set precomputed predictions if available
+    if precomputed_predictions:
+        logger.info("✓ Setting precomputed consensus predictions for Optuna")
+        optimizer.set_precomputed_predictions(precomputed_predictions)
 
     logger.info(
         f"Using pre-selected {len(optuna_maneuvers)} maneuvers for optimization"
@@ -1543,12 +1643,59 @@ def main():
                 f"📖 Visualization manifest ready: {Path(visualization_manifest_path).name}"
             )
 
+        # Phase 0A: Pre-Generate Consensus Predictions for Optuna
+        optuna_precomputed_predictions = None
+        if not args.skip_optuna and not args.comparison_only and optuna_maneuvers:
+            pregen_config = optuna_config.get("consensus_pregeneration", {})
+            if pregen_config.get("enabled", True):
+                logger.info("\n" + "=" * 80)
+                logger.info("PHASE 0A: PRE-GENERATING CONSENSUS PREDICTIONS FOR OPTUNA")
+                logger.info("=" * 80)
+
+                # Load consensus parameters
+                consensus_params = load_consensus_params(args, optuna_config)
+                logger.info(f"✓ Loaded params for: {list(consensus_params.keys())}")
+
+                # Initialize consensus manager (if not already done by Optuna setup)
+                from utils.consensus_manager import ConsensusManager
+                from utils.quality_filter import AdaptiveQualityFilter
+
+                quality_filter = AdaptiveQualityFilter(
+                    w_confidence=0.4, w_stability=0.4, w_completeness=0.2
+                )
+                consensus_cache_dir = run_manager.run_dir / "consensus_cache"
+                consensus_cache_dir.mkdir(parents=True, exist_ok=True)
+
+                consensus_manager = ConsensusManager(
+                    consensus_models=["yolov8", "pytorch_pose", "mmpose"],
+                    quality_filter=quality_filter,
+                    cache_dir=consensus_cache_dir,
+                )
+
+                # Pre-generate predictions
+                optuna_precomputed_predictions = (
+                    consensus_manager.pregenerate_consensus_predictions(
+                        maneuvers=optuna_maneuvers,
+                        consensus_params=consensus_params,
+                        phase="optuna",
+                    )
+                )
+
+                logger.info("✅ Phase 0A complete: Consensus predictions cached")
+                logger.info("=" * 80 + "\n")
+            else:
+                logger.info("⏭️ Consensus pre-generation disabled in config")
+
         # Phase 1: Optuna Optimization
         if not args.skip_optuna and not args.comparison_only:
             memory_profiler.log_milestone("optuna_phase_start")
             if optuna_maneuvers:
                 optuna_result = run_optuna_phase(
-                    run_manager, args, optuna_maneuvers, memory_profiler
+                    run_manager,
+                    args,
+                    optuna_maneuvers,
+                    memory_profiler,
+                    precomputed_predictions=optuna_precomputed_predictions,
                 )
                 results["optuna_phase"] = "completed"
                 results["configs_used"].append(optuna_result["config_path"])
@@ -1594,6 +1741,78 @@ def main():
                 )
                 logger.warning("⏭️ Skipping COCO validation phase")
                 results["coco_validation_phase"] = "skipped"
+
+        # Phase 0B: Pre-Generate Consensus Predictions for Comparison (with optimized params)
+        comparison_precomputed_predictions = None
+        if not args.skip_comparison and not args.optuna_only and comparison_maneuvers:
+            pregen_config = optuna_config.get("consensus_pregeneration", {})
+            if (
+                pregen_config.get("enabled", True)
+                and results.get("optuna_phase") == "completed"
+            ):
+                logger.info("\n" + "=" * 80)
+                logger.info(
+                    "PHASE 0B: PRE-GENERATING CONSENSUS PREDICTIONS FOR COMPARISON"
+                )
+                logger.info("=" * 80)
+                logger.info("Using OPTIMIZED parameters from Optuna Phase 1")
+
+                # Load optimized parameters from best_params
+                best_params_dir = run_manager.run_dir / "best_params"
+                best_params_file = best_params_dir / "best_parameters.yaml"
+
+                if best_params_file.exists():
+                    with open(best_params_file) as f:
+                        optimized_params = yaml.safe_load(f)
+
+                    consensus_params = {
+                        model: optimized_params.get(model, {})
+                        for model in ["yolov8", "pytorch_pose", "mmpose"]
+                    }
+                    logger.info(
+                        f"✓ Loaded optimized params for: {list(consensus_params.keys())}"
+                    )
+
+                    # Initialize consensus manager
+                    from utils.consensus_manager import ConsensusManager
+                    from utils.quality_filter import AdaptiveQualityFilter
+
+                    quality_filter = AdaptiveQualityFilter(
+                        w_confidence=0.4, w_stability=0.4, w_completeness=0.2
+                    )
+                    consensus_cache_dir = run_manager.run_dir / "consensus_cache"
+                    consensus_cache_dir.mkdir(parents=True, exist_ok=True)
+
+                    consensus_manager = ConsensusManager(
+                        consensus_models=["yolov8", "pytorch_pose", "mmpose"],
+                        quality_filter=quality_filter,
+                        cache_dir=consensus_cache_dir,
+                    )
+
+                    # Pre-generate predictions with optimized params
+                    comparison_precomputed_predictions = (
+                        consensus_manager.pregenerate_consensus_predictions(
+                            maneuvers=comparison_maneuvers,
+                            consensus_params=consensus_params,
+                            phase="comparison",
+                        )
+                    )
+
+                    logger.info(
+                        "✅ Phase 0B complete: Consensus predictions cached with optimized params"
+                    )
+                    logger.info("=" * 80 + "\n")
+                else:
+                    logger.warning("⚠️ Best params not found, skipping Phase 0B")
+            elif (
+                pregen_config.get("enabled", True)
+                and results.get("optuna_phase") != "completed"
+            ):
+                logger.info(
+                    "⏭️ Skipping Phase 0B: No optimized params available (Optuna was skipped)"
+                )
+            else:
+                logger.info("⏭️ Consensus pre-generation disabled in config")
 
         # Phase 3: Production Dataset Comparison (Multi-step)
         if not args.skip_comparison and not args.optuna_only:

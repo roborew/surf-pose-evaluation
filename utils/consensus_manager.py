@@ -101,11 +101,100 @@ class ConsensusManager:
 
         return models
 
+    def pregenerate_consensus_predictions(
+        self,
+        maneuvers: List,
+        consensus_params: Dict[str, Dict],
+        phase: str = "optuna",
+    ) -> Dict[str, Dict[str, List]]:
+        """
+        Pre-generate predictions from consensus models with predetermined parameters.
+
+        This is Phase 0A/0B: Generate predictions once to be reused across all Optuna trials.
+
+        Args:
+            maneuvers: List of Maneuver objects to process
+            consensus_params: Dictionary mapping model names to their parameters
+                e.g., {"yolov8": {...}, "pytorch_pose": {...}, "mmpose": {...}}
+            phase: Phase name ('optuna' or 'comparison')
+
+        Returns:
+            Dictionary mapping model_name -> maneuver_id -> frame_predictions
+            Format: {model_name: {maneuver_id: [frame_predictions]}}
+        """
+        # Check if already cached
+        cache_file = self.cache_dir / f"pregenerated_{phase}_predictions.json"
+
+        if cache_file.exists():
+            logger.info(f"📦 Loading pregenerated predictions from cache: {cache_file}")
+            with open(cache_file) as f:
+                return json.load(f)
+
+        print(f"\n{'='*80}")
+        print(f"🔧 PHASE 0: PRE-GENERATING CONSENSUS PREDICTIONS ({phase.upper()})")
+        print(f"{'='*80}")
+        print(f"   Models: {', '.join(self.consensus_models)}")
+        print(f"   Maneuvers: {len(maneuvers)}")
+        print(f"   Purpose: Generate once, reuse for all Optuna trials")
+        print(f"{'='*80}\n")
+
+        logger.info(
+            f"Pre-generating consensus predictions for {phase} phase\n"
+            f"  Models: {self.consensus_models}\n"
+            f"  Maneuvers: {len(maneuvers)}\n"
+            f"  Output: {cache_file}"
+        )
+
+        all_predictions = {}
+
+        for model_name in self.consensus_models:
+            print(f"\n📊 Generating predictions for {model_name}...")
+            model_params = consensus_params.get(model_name, {})
+
+            # Load model with predetermined params
+            model = self.generator.load_model(
+                model_name, custom_params=model_params.copy()
+            )
+
+            model_predictions = {}
+            for maneuver in tqdm(maneuvers, desc=f"  {model_name}"):
+                try:
+                    video_path = maneuver.file_path
+                    predictions = self.generator.run_inference_on_maneuver(
+                        model_name, video_path, maneuver
+                    )
+                    model_predictions[maneuver.maneuver_id] = predictions
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to generate predictions for {model_name}/{maneuver.maneuver_id}: {e}"
+                    )
+                    model_predictions[maneuver.maneuver_id] = []
+
+            all_predictions[model_name] = model_predictions
+
+            # Unload model to free memory
+            self.generator.unload_model(model_name)
+            logger.info(f"✓ Completed {model_name}: {len(model_predictions)} maneuvers")
+
+        # Save to cache
+        logger.info(f"💾 Caching predictions to {cache_file}")
+        with open(cache_file, "w") as f:
+            json.dump(all_predictions, f, indent=2)
+
+        print(f"\n✅ Pre-generation complete!")
+        print(f"   Cached to: {cache_file.name}")
+        print(
+            f"   Total predictions: {sum(len(p) for p in all_predictions.values())} maneuvers\n"
+        )
+
+        return all_predictions
+
     def generate_consensus_gt(
         self,
         maneuvers: List,
         target_model: str,
         phase: str = "optuna",
+        precomputed_predictions: Optional[Dict[str, Dict[str, List]]] = None,
     ) -> Dict[str, Any]:
         """
         Generate and cache consensus ground truth for target model.
@@ -114,14 +203,16 @@ class ConsensusManager:
             maneuvers: List of Maneuver objects to process
             target_model: Model being optimized
             phase: Phase name ('optuna' or 'comparison')
+            precomputed_predictions: Optional precomputed predictions from Phase 0
+                Format: {model_name: {maneuver_id: [frame_predictions]}}
 
         Returns:
             Dictionary mapping maneuver_id -> consensus frames
         """
-        # Check cache first
+        # Check cache first (but only if not using precomputed predictions)
         cache_file = self.cache_dir / f"{target_model}_{phase}_gt.json"
 
-        if cache_file.exists():
+        if cache_file.exists() and not precomputed_predictions:
             print(f"   📦 Loading cached consensus from {cache_file.name}")
             logger.info(
                 f"Loading cached consensus for {target_model} from {cache_file.name}"
@@ -131,10 +222,15 @@ class ConsensusManager:
         print(f"\n🔧 GENERATING CONSENSUS GT FOR {target_model.upper()}")
         print(f"   Phase: {phase}")
         print(f"   Maneuvers to process: {len(maneuvers)}")
+        if precomputed_predictions:
+            print(f"   Using precomputed predictions: YES ✓")
+        else:
+            print(f"   Using precomputed predictions: NO (running fresh inference)")
 
         logger.info(
             f"Generating consensus GT for {target_model} ({phase} phase)\n"
-            f"  Processing {len(maneuvers)} maneuvers..."
+            f"  Processing {len(maneuvers)} maneuvers...\n"
+            f"  Precomputed: {bool(precomputed_predictions)}"
         )
 
         # Determine which models to use (leave-one-out)
@@ -156,11 +252,12 @@ class ConsensusManager:
                 # Get video path from maneuver
                 video_path = maneuver.file_path
 
-                # Generate consensus frames
+                # Generate consensus frames (using precomputed if available)
                 consensus_frames = self.generator.generate_consensus_for_maneuver(
                     model_names=consensus_models,
                     video_path=video_path,
                     maneuver=maneuver,
+                    precomputed_predictions=precomputed_predictions,
                 )
 
                 # Store consensus data

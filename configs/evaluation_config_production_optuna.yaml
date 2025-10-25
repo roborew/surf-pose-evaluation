@@ -49,7 +49,7 @@ evaluation:
     models: ["yolov8_pose", "pytorch_pose", "mmpose"] # Fast model for quick validation
   comprehensive_test:
     enabled: true
-    num_clips: 75 # Increased for more robust optimization data
+    num_clips: 50 # Optimized for efficient consensus-based validation
     models: ["mediapipe", "blazepose", "yolov8_pose", "pytorch_pose", "mmpose"]
 
 # Optuna Optimization
@@ -57,7 +57,7 @@ optuna:
   enabled: true
   study_name: "surf_pose_optimization_production"
   direction: "maximize" # Maximize PCK accuracy
-  n_trials: 200 # Thorough optimization
+  n_trials: 100 # Balanced optimization with pre-generated consensus
   timeout_minutes: 300 # 5 hours max per model
   sampler: "TPESampler"
   pruner: "MedianPruner"
@@ -94,7 +94,7 @@ optuna_validation:
   use_consensus: true
 
   # Number of clips for Optuna optimization
-  num_clips: 75
+  num_clips: 50
 
   # Cameras to use for Optuna (focused on SONY_300 for quality)
   cameras:
@@ -113,6 +113,16 @@ models_to_optimize:
 
 # Consensus configuration reference
 consensus_config: configs/consensus_config.yaml
+
+# Consensus Pre-Generation Configuration
+consensus_pregeneration:
+  enabled: true
+  # Source for consensus model parameters: "best_params", "file", or "defaults"
+  params_source: "best_params"
+  # Path to YAML with predetermined params (optional, used if params_source="file")
+  params_file: null
+  # Previous run to load best params from (used if params_source="best_params")
+  previous_run_path: "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results/runs/20251019_182446_full_pose_comparison"
 
 # Performance Configuration (Production optimized)
 performance:

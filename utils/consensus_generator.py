@@ -49,12 +49,13 @@ class ConsensusGenerator:
 
         logger.info(f"ConsensusGenerator initialized with models: {model_names}")
 
-    def load_model(self, model_name: str):
+    def load_model(self, model_name: str, custom_params: Optional[Dict] = None):
         """
-        Load model wrapper on demand.
+        Load model wrapper on demand with optional custom parameters.
 
         Args:
             model_name: Name of model to load ('yolov8', 'pytorch_pose', etc.)
+            custom_params: Optional dictionary of custom parameters for model initialization
 
         Returns:
             Model wrapper instance
@@ -63,33 +64,38 @@ class ConsensusGenerator:
             return self.models[model_name]
 
         logger.info(f"Loading model: {model_name}")
+        if custom_params:
+            logger.info(f"  Using custom params: {list(custom_params.keys())}")
 
-        # Import and instantiate model wrappers
+        # Import and instantiate model wrappers with custom params
         try:
+            params = custom_params or {}
+            device = params.pop("device", "cpu")  # Extract device, default to CPU
+
             if model_name == "yolov8":
                 from models.yolov8_wrapper import YOLOv8Wrapper
 
-                model = YOLOv8Wrapper(device="cpu")  # TODO: Support GPU config
+                model = YOLOv8Wrapper(device=device, **params)
 
             elif model_name == "pytorch_pose":
                 from models.pytorch_pose_wrapper import PyTorchPoseWrapper
 
-                model = PyTorchPoseWrapper(device="cpu")
+                model = PyTorchPoseWrapper(device=device, **params)
 
             elif model_name == "mmpose":
                 from models.mmpose_wrapper import MMPoseWrapper
 
-                model = MMPoseWrapper(device="cpu")
+                model = MMPoseWrapper(device=device, **params)
 
             elif model_name == "mediapipe":
                 from models.mediapipe_wrapper import MediaPipePoseModel
 
-                model = MediaPipePoseModel()
+                model = MediaPipePoseModel(**params)
 
             elif model_name == "blazepose":
                 from models.blazepose_wrapper import BlazePoseModel
 
-                model = BlazePoseModel()
+                model = BlazePoseModel(**params)
 
             else:
                 raise ValueError(f"Unknown model name: {model_name}")
@@ -269,27 +275,52 @@ class ConsensusGenerator:
         model_names: List[str],
         video_path: str,
         maneuver,
+        precomputed_predictions: Optional[Dict[str, Dict[str, List]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Generate consensus GT for a single maneuver.
 
-        Runs all specified models and aggregates their predictions.
+        Uses precomputed predictions if available, otherwise runs inference.
 
         Args:
             model_names: List of models to use for consensus
             video_path: Path to video file
             maneuver: Maneuver object
+            precomputed_predictions: Optional precomputed predictions
+                Format: {model_name: {maneuver_id: [frame_predictions]}}
 
         Returns:
             List of consensus frames
         """
-        # Run inference with each model
-        model_predictions = {}
-        for model_name in model_names:
-            predictions = self.run_inference_on_maneuver(
-                model_name, video_path, maneuver
-            )
-            model_predictions[model_name] = predictions
+        # Use precomputed predictions if available
+        if precomputed_predictions:
+            logger.debug(f"Using precomputed predictions for {maneuver.maneuver_id}")
+            model_predictions = {}
+            for model_name in model_names:
+                if (
+                    model_name in precomputed_predictions
+                    and maneuver.maneuver_id in precomputed_predictions[model_name]
+                ):
+                    model_predictions[model_name] = precomputed_predictions[model_name][
+                        maneuver.maneuver_id
+                    ]
+                else:
+                    logger.warning(
+                        f"Missing precomputed predictions for {model_name}/{maneuver.maneuver_id}, "
+                        "running inference"
+                    )
+                    model_predictions[model_name] = self.run_inference_on_maneuver(
+                        model_name, video_path, maneuver
+                    )
+        else:
+            # Run inference with each model
+            logger.debug(f"Running fresh inference for {maneuver.maneuver_id}")
+            model_predictions = {}
+            for model_name in model_names:
+                predictions = self.run_inference_on_maneuver(
+                    model_name, video_path, maneuver
+                )
+                model_predictions[model_name] = predictions
 
         # Aggregate predictions into consensus
         consensus_frames = self.aggregate_predictions(model_predictions)
