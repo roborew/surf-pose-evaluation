@@ -8,6 +8,7 @@ circular reasoning during Optuna optimization.
 
 import json
 import logging
+import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from tqdm import tqdm
@@ -64,6 +65,29 @@ class ConsensusManager:
             f"  Consensus models: {consensus_models}\n"
             f"  Cache directory: {cache_dir}"
         )
+
+    def _convert_numpy_to_lists(self, obj):
+        """
+        Recursively convert numpy arrays to lists for JSON serialization.
+
+        Args:
+            obj: Object to convert (can be dict, list, ndarray, or primitive)
+
+        Returns:
+            JSON-serializable version of obj
+        """
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {
+                key: self._convert_numpy_to_lists(value) for key, value in obj.items()
+            }
+        elif isinstance(obj, list):
+            return [self._convert_numpy_to_lists(item) for item in obj]
+        elif isinstance(obj, (np.integer, np.floating)):
+            return obj.item()
+        else:
+            return obj
 
     def get_consensus_models_for_target(self, target_model: str) -> List[str]:
         """
@@ -176,10 +200,11 @@ class ConsensusManager:
             self.generator.unload_model(model_name)
             logger.info(f"✓ Completed {model_name}: {len(model_predictions)} maneuvers")
 
-        # Save to cache
+        # Save to cache (convert numpy arrays to lists for JSON serialization)
         logger.info(f"💾 Caching predictions to {cache_file}")
+        serializable_predictions = self._convert_numpy_to_lists(all_predictions)
         with open(cache_file, "w") as f:
-            json.dump(all_predictions, f, indent=2)
+            json.dump(serializable_predictions, f, indent=2)
 
         print(f"\n✅ Pre-generation complete!")
         print(f"   Cached to: {cache_file.name}")
