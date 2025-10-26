@@ -313,7 +313,7 @@ def discover_consensus_cache(config: Dict, run_manager: RunManager) -> Optional[
             logger.warning(f"⚠️ Specified cache invalid: {cache_path}")
 
     # Auto-discover from most recent run
-    runs_base = run_manager.results_dir.parent  # Get runs directory
+    runs_base = run_manager.run_dir.parent  # Get runs directory (parent of current run)
     if not runs_base.exists():
         logger.info("📂 No previous runs found, will generate cache")
         return None
@@ -321,7 +321,7 @@ def discover_consensus_cache(config: Dict, run_manager: RunManager) -> Optional[
     # Get all run directories sorted by modification time (most recent first)
     try:
         recent_runs = sorted(
-            [d for d in runs_base.iterdir() if d.is_dir()],
+            [d for d in runs_base.iterdir() if d.is_dir() and d != run_manager.run_dir],
             key=lambda x: x.stat().st_mtime,
             reverse=True,
         )
@@ -329,7 +329,7 @@ def discover_consensus_cache(config: Dict, run_manager: RunManager) -> Optional[
         logger.warning(f"⚠️ Could not scan runs directory: {e}")
         return None
 
-    # Check up to 5 most recent runs
+    # Check up to 5 most recent runs (excluding current run)
     for run_dir in recent_runs[:5]:
         cache_dir = run_dir / "consensus_cache"
         if validate_consensus_cache(cache_dir):
