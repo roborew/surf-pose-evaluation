@@ -285,6 +285,102 @@ def load_consensus_params(args, config: Dict) -> Dict[str, Dict]:
     return default_params
 
 
+def discover_consensus_cache(config: Dict, run_manager: RunManager) -> Optional[Path]:
+    """Auto-discover consensus cache from most recent complete run
+
+    Args:
+        config: Loaded configuration dictionary
+        run_manager: Current run manager instance
+
+    Returns:
+        Path to consensus cache directory if found, None otherwise
+    """
+    logger = logging.getLogger(__name__)
+    cache_config = config.get("consensus_cache", {})
+
+    # Check if auto-reuse is disabled
+    if not cache_config.get("auto_reuse", True):
+        logger.info("🔄 Consensus cache auto-reuse disabled, will regenerate")
+        return None
+
+    # Check for manually specified cache
+    if cache_config.get("cache_dir"):
+        cache_path = Path(cache_config["cache_dir"])
+        if validate_consensus_cache(cache_path):
+            logger.info(f"📦 Using manually specified cache: {cache_path}")
+            return cache_path
+        else:
+            logger.warning(f"⚠️ Specified cache invalid: {cache_path}")
+
+    # Auto-discover from most recent run
+    runs_base = run_manager.results_dir.parent  # Get runs directory
+    if not runs_base.exists():
+        logger.info("📂 No previous runs found, will generate cache")
+        return None
+
+    # Get all run directories sorted by modification time (most recent first)
+    try:
+        recent_runs = sorted(
+            [d for d in runs_base.iterdir() if d.is_dir()],
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ Could not scan runs directory: {e}")
+        return None
+
+    # Check up to 5 most recent runs
+    for run_dir in recent_runs[:5]:
+        cache_dir = run_dir / "consensus_cache"
+        if validate_consensus_cache(cache_dir):
+            logger.info(f"✅ Found valid consensus cache: {run_dir.name}")
+            logger.info(f"   Cache location: {cache_dir}")
+            return cache_dir
+
+    logger.info("📂 No valid consensus cache found in recent runs, will regenerate")
+    return None
+
+
+def validate_consensus_cache(cache_dir: Path) -> bool:
+    """Check if cache directory has all required files
+
+    Args:
+        cache_dir: Path to potential cache directory
+
+    Returns:
+        True if cache is valid and complete, False otherwise
+    """
+    if not cache_dir.exists():
+        return False
+
+    required_files = [
+        "pregenerated_optuna_predictions.json",
+    ]
+
+    # Check if all required files exist
+    for filename in required_files:
+        if not (cache_dir / filename).exists():
+            return False
+
+    # Optional: Check if files are not empty
+    try:
+        cache_file = cache_dir / "pregenerated_optuna_predictions.json"
+        if cache_file.stat().st_size == 0:
+            return False
+
+        # Try to load to verify it's valid JSON
+        with open(cache_file) as f:
+            data = json.load(f)
+            # Check if it has predictions for consensus models
+            if not data or len(data) < 2:  # Expect at least 2 models
+                return False
+
+    except Exception:
+        return False
+
+    return True
+
+
 def resolve_clip_counts(
     args, optuna_config_path: str, comparison_config_path: str
 ) -> tuple[Optional[int], Optional[int]]:
@@ -1643,20 +1739,52 @@ def main():
                 f"📖 Visualization manifest ready: {Path(visualization_manifest_path).name}"
             )
 
-        # Phase 0A: Pre-Generate Consensus Predictions for Optuna
+        # Phase 0A: Consensus Cache Discovery and Loading
         optuna_precomputed_predictions = None
         if not args.skip_optuna and not args.comparison_only and optuna_maneuvers:
-            pregen_config = optuna_config.get("consensus_pregeneration", {})
-            if pregen_config.get("enabled", True):
-                logger.info("\n" + "=" * 80)
-                logger.info("PHASE 0A: PRE-GENERATING CONSENSUS PREDICTIONS FOR OPTUNA")
-                logger.info("=" * 80)
+            logger.info("\n" + "=" * 80)
+            logger.info("PHASE 0A: CONSENSUS CACHE MANAGEMENT")
+            logger.info("=" * 80)
+
+            # Try to discover existing cache
+            discovered_cache = discover_consensus_cache(optuna_config, run_manager)
+
+            if discovered_cache:
+                # Load from discovered cache
+                try:
+                    cache_file = (
+                        discovered_cache / "pregenerated_optuna_predictions.json"
+                    )
+                    logger.info(f"📦 Loading consensus predictions from cache...")
+                    with open(cache_file) as f:
+                        optuna_precomputed_predictions = json.load(f)
+                    logger.info(
+                        f"✅ Loaded {len(optuna_precomputed_predictions)} model predictions from cache"
+                    )
+                    logger.info(
+                        f"   Models: {', '.join(optuna_precomputed_predictions.keys())}"
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to load cache: {e}")
+                    logger.info("   Will regenerate consensus predictions")
+                    discovered_cache = None
+
+            # Generate new cache if none found or loading failed
+            if not discovered_cache:
+                logger.info("🔄 Generating fresh consensus predictions...")
 
                 # Load consensus parameters
-                consensus_params = load_consensus_params(args, optuna_config)
-                logger.info(f"✓ Loaded params for: {list(consensus_params.keys())}")
+                cache_config = optuna_config.get("consensus_cache", {})
+                params_source = cache_config.get("regenerate_params_source", "defaults")
 
-                # Initialize consensus manager (if not already done by Optuna setup)
+                # Get consensus params based on source
+                consensus_params = {}
+                if params_source == "defaults":
+                    logger.info("📄 Using model default parameters for consensus")
+                    consensus_params = load_consensus_params(args, optuna_config)
+                # Can extend with "best_params" or "file" options later
+
+                # Initialize consensus manager
                 from utils.consensus_manager import ConsensusManager
                 from utils.quality_filter import AdaptiveQualityFilter
 
@@ -1681,10 +1809,11 @@ def main():
                     )
                 )
 
-                logger.info("✅ Phase 0A complete: Consensus predictions cached")
-                logger.info("=" * 80 + "\n")
-            else:
-                logger.info("⏭️ Consensus pre-generation disabled in config")
+                logger.info(
+                    "✅ Phase 0A complete: Consensus predictions generated and cached"
+                )
+
+            logger.info("=" * 80 + "\n")
 
         # Phase 1: Optuna Optimization
         if not args.skip_optuna and not args.comparison_only:

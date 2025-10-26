@@ -25,7 +25,7 @@ data_source:
       balanced_distribution: true
       force_no_zoom_in_val: true
   camera_selection:
-    enabled_cameras: ["SONY_300"] # Production uses both cameras
+    enabled_cameras: ["SONY_300", "SONY_70"] # Use both cameras for robust optimization
     max_clips_per_session: 60 # Reasonable subset for optimization speed
 
 # Model Configuration
@@ -66,7 +66,7 @@ optuna:
   early_stopping:
     enabled: true
     patience: 10 # Stop if no improvement for 10 trials
-    min_trials: 15 # Minimum trials before early stopping
+    min_trials: 30 # Minimum trials before early stopping (increased for better exploration)
     improvement_threshold: 0.001 # Minimum improvement to continue
     plateau_threshold: 0.95 # Consider plateaued if within 95% of best
 
@@ -96,9 +96,10 @@ optuna_validation:
   # Number of clips for Optuna optimization
   num_clips: 50
 
-  # Cameras to use for Optuna (focused on SONY_300 for quality)
+  # Cameras to use for Optuna (both cameras for robust optimization)
   cameras:
     - SONY_300
+    - SONY_70
 
   # Ensure no overlap with comparison validation set
   ensure_no_overlap_with_comparison: true
@@ -114,15 +115,17 @@ models_to_optimize:
 # Consensus configuration reference
 consensus_config: configs/consensus_config.yaml
 
-# Consensus Pre-Generation Configuration
-consensus_pregeneration:
-  enabled: true
-  # Source for consensus model parameters: "best_params", "file", or "defaults"
-  params_source: "best_params"
-  # Path to YAML with predetermined params (optional, used if params_source="file")
-  params_file: null
-  # Previous run to load best params from (used if params_source="best_params")
-  previous_run_path: "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results/runs/20251019_182446_full_pose_comparison"
+# Consensus Cache Configuration - Smart automatic reuse
+consensus_cache:
+  # Automatically discover and reuse cache from most recent complete run
+  auto_reuse: true # Set to false to always regenerate
+
+  # Optional: manually specify cache directory (if null, auto-discover from results/runs/)
+  cache_dir: null
+
+  # If no cache found or auto_reuse=false, regenerate with these params
+  regenerate_params_source: "defaults" # "best_params", "file", or "defaults"
+  regenerate_params_file: null
 
 # Performance Configuration (Production optimized)
 performance:
