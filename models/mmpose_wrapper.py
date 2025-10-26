@@ -358,20 +358,26 @@ class MMPoseWrapper(BasePoseModel):
                 keypoint_scores = target_scores
 
             # Apply pose threshold filter (Optuna parameter)
-            # Filter out persons with low average keypoint confidence
-            if len(keypoints) > 0:
-                person_avg_scores = np.mean(keypoint_scores, axis=1)
-                valid_persons = person_avg_scores >= self.pose_threshold
-                keypoints = keypoints[valid_persons]
-                keypoint_scores = keypoint_scores[valid_persons]
+            # Zero out low-confidence keypoints (not entire persons)
+            if len(keypoints) > 0 and self.pose_threshold > 0:
+                # Mark low-confidence keypoints as invalid by zeroing their coordinates
+                low_conf_mask = keypoint_scores < self.pose_threshold
+                keypoints[low_conf_mask] = 0.0
+                keypoint_scores[low_conf_mask] = 0.0
+
+                # Remove persons with too few valid keypoints (< 3)
+                valid_keypoint_count = np.sum(keypoint_scores > 0, axis=1)
+                persons_with_enough_keypoints = valid_keypoint_count >= 3
+                keypoints = keypoints[persons_with_enough_keypoints]
+                keypoint_scores = keypoint_scores[persons_with_enough_keypoints]
                 if len(bboxes) > 0:
-                    bboxes = bboxes[valid_persons]
+                    bboxes = bboxes[persons_with_enough_keypoints]
 
             # Limit to max_persons (Optuna parameter)
             if len(keypoints) > self.max_persons:
-                # Keep top N persons by average keypoint confidence
-                person_avg_scores = np.mean(keypoint_scores, axis=1)
-                top_indices = np.argsort(person_avg_scores)[::-1][: self.max_persons]
+                # Keep top N persons by count of valid keypoints
+                valid_keypoint_count = np.sum(keypoint_scores > 0, axis=1)
+                top_indices = np.argsort(valid_keypoint_count)[::-1][: self.max_persons]
                 keypoints = keypoints[top_indices]
                 keypoint_scores = keypoint_scores[top_indices]
                 if len(bboxes) > 0:
