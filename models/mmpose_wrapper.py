@@ -139,8 +139,16 @@ class MMPoseWrapper(BasePoseModel):
         start_time = time.time()
 
         try:
-            # Use the simple inference approach that works
-            results = list(self.inferencer(image))
+            # Use the simple inference approach with Optuna-tuned parameters
+            # MMPoseInferencer.__call__ accepts these parameters for detection/filtering
+            results = list(
+                self.inferencer(
+                    image,
+                    bbox_thr=self.detection_threshold,  # Detection confidence threshold
+                    nms_thr=self.nms_threshold,  # NMS IoU threshold
+                    pose_based_nms=True,  # Use pose-based NMS (better for overlapping persons)
+                )
+            )
 
             inference_time = time.time() - start_time
 
@@ -359,15 +367,33 @@ class MMPoseWrapper(BasePoseModel):
 
             # Apply pose threshold filter (Optuna parameter)
             # Zero out low-confidence keypoints (not entire persons)
-            if len(keypoints) > 0 and self.pose_threshold > 0:
+            if len(keypoints) > 0:
+                # Count valid keypoints BEFORE filtering (for stats)
+                initial_person_count = len(keypoints)
+
                 # Mark low-confidence keypoints as invalid by zeroing their coordinates
                 low_conf_mask = keypoint_scores < self.pose_threshold
                 keypoints[low_conf_mask] = 0.0
                 keypoint_scores[low_conf_mask] = 0.0
 
-                # Remove persons with too few valid keypoints (< 3)
+                # Remove persons with too few valid keypoints (< 1)
+                # We keep persons with at least 1 high-confidence keypoint
                 valid_keypoint_count = np.sum(keypoint_scores > 0, axis=1)
-                persons_with_enough_keypoints = valid_keypoint_count >= 3
+                persons_with_enough_keypoints = valid_keypoint_count >= 1
+
+                if (
+                    not np.any(persons_with_enough_keypoints)
+                    and initial_person_count > 0
+                ):
+                    # Log when all persons are filtered out (all have 0 valid keypoints)
+                    import logging
+
+                    logging.debug(
+                        f"MMPose: All {initial_person_count} persons filtered out (no keypoints above threshold). "
+                        f"pose_threshold={self.pose_threshold:.3f}, "
+                        f"max valid keypoints: {valid_keypoint_count.max() if len(valid_keypoint_count) > 0 else 0}"
+                    )
+
                 keypoints = keypoints[persons_with_enough_keypoints]
                 keypoint_scores = keypoint_scores[persons_with_enough_keypoints]
                 if len(bboxes) > 0:
