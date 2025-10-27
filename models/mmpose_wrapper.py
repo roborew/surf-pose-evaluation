@@ -26,13 +26,7 @@ class MMPoseWrapper(BasePoseModel):
 
         Args:
             device: Compute device ('cpu', 'cuda', 'mps')
-            **kwargs: Model configuration including:
-                - detection_threshold: Threshold for person detection
-                - pose_threshold: Threshold for pose keypoint confidence
-                - nms_threshold: NMS threshold for overlapping detections
-                - model_variant: 'lightweight', 'default', or 'high_accuracy'
-                - max_persons: Maximum number of persons to detect
-                - use_multi_scale: Whether to use multi-scale detection
+            **kwargs: Model configuration
         """
         if not MMPOSE_AVAILABLE:
             raise ImportError(
@@ -41,17 +35,9 @@ class MMPoseWrapper(BasePoseModel):
 
         super().__init__(device, **kwargs)
 
-        # Store all configuration parameters from Optuna
-        self.detection_threshold = kwargs.get("detection_threshold", 0.3)
-        self.pose_threshold = kwargs.get("pose_threshold", 0.3)
-        self.nms_threshold = kwargs.get("nms_threshold", 0.3)
-        self.model_variant = kwargs.get("model_variant", "lightweight")
-        self.max_persons = kwargs.get("max_persons", 2)
-        self.use_multi_scale = kwargs.get("use_multi_scale", True)
-
-        # Legacy parameters (kept for backward compatibility)
-        self.kpt_thr = kwargs.get("kpt_thr", self.pose_threshold)
-        self.bbox_thr = kwargs.get("bbox_thr", self.detection_threshold)
+        # Configuration
+        self.kpt_thr = kwargs.get("kpt_thr", 0.3)
+        self.bbox_thr = kwargs.get("bbox_thr", 0.3)
 
         # Smart device selection with MPS override for MMPose/MMDetection compatibility
         self.requested_device = device
@@ -77,20 +63,11 @@ class MMPoseWrapper(BasePoseModel):
     def load_model(self) -> None:
         """Load MMPose inferencer with proper device and fallback"""
         try:
-            # Select model variant based on configuration
-            # Note: MMPoseInferencer uses "human" preset which is good for general use
-            # The variant parameter affects post-processing behavior
-            model_name = "human"  # Could be extended to support other models
-
+            # Primary: Use "human" preset with requested device
             print(f"Initializing MMPose with device: {self.mmpose_device}")
-            print(f"  Model variant: {self.model_variant}")
-            print(f"  Detection threshold: {self.detection_threshold:.3f}")
-            print(f"  Pose threshold: {self.pose_threshold:.3f}")
-            print(f"  Max persons: {self.max_persons}")
-
             self.inferencer = MMPoseInferencer(
-                pose2d=model_name,
-                # det_model parameter intentionally omitted - uses default detector
+                pose2d="human",
+                # det_model="rtmdet-m_640-8xb32_coco-person",  # Explicit detection
                 device=self.mmpose_device,
             )
             self.is_initialized = True
@@ -108,7 +85,7 @@ class MMPoseWrapper(BasePoseModel):
                     print("🔄 Falling back to CPU...")
                     self.inferencer = MMPoseInferencer(
                         pose2d="human",
-                        # det_model parameter intentionally omitted - uses default detector
+                        # det_model="rtmdet-m_640-8xb32_coco-person",
                         device="cpu",
                     )
                     self.is_initialized = True
@@ -139,34 +116,10 @@ class MMPoseWrapper(BasePoseModel):
         start_time = time.time()
 
         try:
-            # Use the simple inference approach with Optuna-tuned parameters
-            # Note: MMPoseInferencer parameters may vary by version
-            # Try with threshold parameters, fall back to simple call if they fail
-            try:
-                results = list(
-                    self.inferencer(
-                        image,
-                        bbox_thr=self.detection_threshold,  # Detection confidence threshold
-                        nms_thr=self.nms_threshold,  # NMS IoU threshold
-                        pose_based_nms=True,  # Use pose-based NMS (better for overlapping persons)
-                    )
-                )
-            except TypeError:
-                # If parameters not supported, use simple call
-                results = list(self.inferencer(image))
+            # Use the simple inference approach that works
+            results = list(self.inferencer(image))
 
             inference_time = time.time() - start_time
-
-            # Debug: Check what we got
-            if not results or len(results) == 0:
-                print(f"⚠️ MMPose: No results returned from inferencer")
-            elif hasattr(results[0], "pred_instances"):
-                num_persons = (
-                    len(results[0].pred_instances.keypoints)
-                    if hasattr(results[0].pred_instances, "keypoints")
-                    else 0
-                )
-                print(f"✓ MMPose detected {num_persons} persons")
 
             # Convert to standardized format
             return self._convert_to_standard_format(results, inference_time)
@@ -381,24 +334,6 @@ class MMPoseWrapper(BasePoseModel):
                 keypoints = target_keypoints
                 keypoint_scores = target_scores
 
-            # Apply pose threshold filter (Optuna parameter)
-            # Filter individual keypoints by confidence, not entire persons
-            if len(keypoints) > 0:
-                # Zero out low-confidence keypoints
-                low_conf_mask = keypoint_scores < self.pose_threshold
-                keypoints[low_conf_mask] = 0.0
-                keypoint_scores[low_conf_mask] = 0.0
-
-            # Limit to max_persons (Optuna parameter)
-            if len(keypoints) > self.max_persons:
-                # Keep top N persons by average keypoint confidence
-                person_avg_scores = np.mean(keypoint_scores, axis=1)
-                top_indices = np.argsort(person_avg_scores)[::-1][: self.max_persons]
-                keypoints = keypoints[top_indices]
-                keypoint_scores = keypoint_scores[top_indices]
-                if len(bboxes) > 0:
-                    bboxes = bboxes[top_indices]
-
             return {
                 "keypoints": keypoints,
                 "scores": keypoint_scores,
@@ -408,10 +343,6 @@ class MMPoseWrapper(BasePoseModel):
                     "model": "mmpose",
                     "inference_time": inference_time,
                     "model_name": "human",
-                    "detection_threshold": self.detection_threshold,
-                    "pose_threshold": self.pose_threshold,
-                    "nms_threshold": self.nms_threshold,
-                    "model_variant": self.model_variant,
                 },
             }
 
