@@ -90,7 +90,7 @@ class MMPoseWrapper(BasePoseModel):
 
             self.inferencer = MMPoseInferencer(
                 pose2d=model_name,
-                # det_model="rtmdet-m_640-8xb32_coco-person",  # Explicit detection
+                # det_model parameter intentionally omitted - uses default detector
                 device=self.mmpose_device,
             )
             self.is_initialized = True
@@ -108,7 +108,7 @@ class MMPoseWrapper(BasePoseModel):
                     print("🔄 Falling back to CPU...")
                     self.inferencer = MMPoseInferencer(
                         pose2d="human",
-                        # det_model="rtmdet-m_640-8xb32_coco-person",
+                        # det_model parameter intentionally omitted - uses default detector
                         device="cpu",
                     )
                     self.is_initialized = True
@@ -140,17 +140,33 @@ class MMPoseWrapper(BasePoseModel):
 
         try:
             # Use the simple inference approach with Optuna-tuned parameters
-            # MMPoseInferencer.__call__ accepts these parameters for detection/filtering
-            results = list(
-                self.inferencer(
-                    image,
-                    bbox_thr=self.detection_threshold,  # Detection confidence threshold
-                    nms_thr=self.nms_threshold,  # NMS IoU threshold
-                    pose_based_nms=True,  # Use pose-based NMS (better for overlapping persons)
+            # Note: MMPoseInferencer parameters may vary by version
+            # Try with threshold parameters, fall back to simple call if they fail
+            try:
+                results = list(
+                    self.inferencer(
+                        image,
+                        bbox_thr=self.detection_threshold,  # Detection confidence threshold
+                        nms_thr=self.nms_threshold,  # NMS IoU threshold
+                        pose_based_nms=True,  # Use pose-based NMS (better for overlapping persons)
+                    )
                 )
-            )
+            except TypeError:
+                # If parameters not supported, use simple call
+                results = list(self.inferencer(image))
 
             inference_time = time.time() - start_time
+
+            # Debug: Check what we got
+            if not results or len(results) == 0:
+                print(f"⚠️ MMPose: No results returned from inferencer")
+            elif hasattr(results[0], "pred_instances"):
+                num_persons = (
+                    len(results[0].pred_instances.keypoints)
+                    if hasattr(results[0].pred_instances, "keypoints")
+                    else 0
+                )
+                print(f"✓ MMPose detected {num_persons} persons")
 
             # Convert to standardized format
             return self._convert_to_standard_format(results, inference_time)
@@ -366,44 +382,18 @@ class MMPoseWrapper(BasePoseModel):
                 keypoint_scores = target_scores
 
             # Apply pose threshold filter (Optuna parameter)
-            # Zero out low-confidence keypoints (not entire persons)
+            # Filter individual keypoints by confidence, not entire persons
             if len(keypoints) > 0:
-                # Count valid keypoints BEFORE filtering (for stats)
-                initial_person_count = len(keypoints)
-
-                # Mark low-confidence keypoints as invalid by zeroing their coordinates
+                # Zero out low-confidence keypoints
                 low_conf_mask = keypoint_scores < self.pose_threshold
                 keypoints[low_conf_mask] = 0.0
                 keypoint_scores[low_conf_mask] = 0.0
 
-                # Remove persons with too few valid keypoints (< 1)
-                # We keep persons with at least 1 high-confidence keypoint
-                valid_keypoint_count = np.sum(keypoint_scores > 0, axis=1)
-                persons_with_enough_keypoints = valid_keypoint_count >= 1
-
-                if (
-                    not np.any(persons_with_enough_keypoints)
-                    and initial_person_count > 0
-                ):
-                    # Log when all persons are filtered out (all have 0 valid keypoints)
-                    import logging
-
-                    logging.debug(
-                        f"MMPose: All {initial_person_count} persons filtered out (no keypoints above threshold). "
-                        f"pose_threshold={self.pose_threshold:.3f}, "
-                        f"max valid keypoints: {valid_keypoint_count.max() if len(valid_keypoint_count) > 0 else 0}"
-                    )
-
-                keypoints = keypoints[persons_with_enough_keypoints]
-                keypoint_scores = keypoint_scores[persons_with_enough_keypoints]
-                if len(bboxes) > 0:
-                    bboxes = bboxes[persons_with_enough_keypoints]
-
             # Limit to max_persons (Optuna parameter)
             if len(keypoints) > self.max_persons:
-                # Keep top N persons by count of valid keypoints
-                valid_keypoint_count = np.sum(keypoint_scores > 0, axis=1)
-                top_indices = np.argsort(valid_keypoint_count)[::-1][: self.max_persons]
+                # Keep top N persons by average keypoint confidence
+                person_avg_scores = np.mean(keypoint_scores, axis=1)
+                top_indices = np.argsort(person_avg_scores)[::-1][: self.max_persons]
                 keypoints = keypoints[top_indices]
                 keypoint_scores = keypoint_scores[top_indices]
                 if len(bboxes) > 0:
