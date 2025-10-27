@@ -1,0 +1,63 @@
+Category,Metric,MediaPipe,BlazePose,YOLOv8-Pose,PyTorch Pose,MMPose,Winner,Phase
+Accuracy_Optuna,Detection Rate %,4.6,1.3,100.0,73.3,100.0,YOLOv8-Pose/MMPose,Optuna
+Accuracy_Optuna,Detection F1,0.499,0.497,0.976,0.801,0.947,YOLOv8-Pose,Optuna
+Accuracy_Optuna,True Positives Mean,3.32,1.04,68.34,48.94,68.34,YOLOv8-Pose/MMPose,Optuna
+Accuracy_Optuna,False Negatives Mean,65.02,67.30,0.00,19.40,0.00,YOLOv8-Pose/MMPose,Optuna
+Accuracy_Optuna,Best Trial Number,0,0,10,11,0,N/A,Optuna
+Accuracy_Optuna,Best Score (Consensus PCK),0,0,0.718,0.781,0.692,PyTorch Pose,Optuna
+Accuracy_COCO,PCK@0.1,0.394,0.435,0.705,0.698,0.755,MMPose,COCO
+Accuracy_COCO,PCK@0.2,0.576,0.594,0.874,0.865,0.898,MMPose,COCO
+Accuracy_COCO,PCK@0.3,0.689,0.710,0.927,0.917,0.935,MMPose,COCO
+Accuracy_COCO,PCK@0.5,0.841,0.855,0.952,0.951,0.968,MMPose,COCO
+Accuracy_COCO,PCK Error Mean,0.424,0.406,0.126,0.135,0.103,MMPose,COCO
+Accuracy_COCO,Detection Precision,1.000,1.000,0.587,0.968,0.559,MediaPipe/BlazePose/PyTorch,COCO
+Accuracy_COCO,Detection Recall,0.196,0.138,1.000,0.671,0.996,YOLOv8-Pose,COCO
+Accuracy_COCO,Detection F1,0.327,0.242,0.740,0.793,0.716,PyTorch Pose,COCO
+Accuracy_COCO,True Positives,44,31,225,151,224,YOLOv8-Pose,COCO
+Accuracy_COCO,False Positives,0,0,158,5,177,MediaPipe/BlazePose,COCO
+Accuracy_COCO,False Negatives,181,194,0,74,1,YOLOv8-Pose,COCO
+Accuracy_Surf,Detection Rate %,3.4,0.9,100.0,41.1,100.0,YOLOv8-Pose/MMPose,Comparison
+Accuracy_Surf,Detection F1,0.499,0.499,0.985,0.661,0.933,YOLOv8-Pose,Comparison
+Accuracy_Surf,Consensus PCK@0.2,0.384,0.312,0.855,0.514,0.679,YOLOv8-Pose,Comparison
+Accuracy_Surf,Consensus PCK Error,0.616,0.688,0.145,0.486,0.321,YOLOv8-Pose,Comparison
+Accuracy_Surf,Consensus Confidence,0.292,0.124,0.336,0.537,0.333,PyTorch Pose,Comparison
+Accuracy_Surf,Detection Consistency,0.965,0.988,0.969,0.912,0.867,BlazePose,Comparison
+Performance_Optuna,FPS Mean,151.6,167.3,162.4,41.5,43.6,BlazePose,Optuna
+Performance_Optuna,Inference Time ms,6.73,6.00,6.16,24.11,22.98,BlazePose,Optuna
+Performance_Optuna,Memory MB,32.0,32.0,902.2,261.8,282.8,MediaPipe/BlazePose,Optuna
+Performance_Optuna,CPU %,11.1,11.3,11.0,15.0,22.4,YOLOv8-Pose,Optuna
+Performance_Optuna,Processing Time hrs,0.78,0.83,0.50,1.75,1.76,YOLOv8-Pose,Optuna
+Performance_COCO,FPS Mean,64.7,71.6,44.5,23.1,15.7,BlazePose,COCO
+Performance_COCO,Inference Time ms,15.45,13.97,22.46,43.26,63.85,BlazePose,COCO
+Performance_COCO,Inference Time Std ms,6.86,6.56,23.98,28.27,21.91,BlazePose,COCO
+Performance_Surf,FPS Mean,153.9,167.2,99.2,39.9,32.7,BlazePose,Comparison
+Performance_Surf,Inference Time ms,6.60,6.00,10.09,25.09,30.61,BlazePose,Comparison
+Performance_Surf,P95 Latency ms,8.91,7.40,11.31,26.27,33.85,BlazePose,Comparison
+Performance_Surf,P99 Latency ms,10.57,8.65,12.73,27.21,35.55,BlazePose,Comparison
+Performance_Surf,Memory MB,32.0,32.0,206.1,271.9,181.6,MediaPipe/BlazePose,Comparison
+Performance_Surf,CPU %,9.8,9.9,8.1,14.1,17.7,YOLOv8-Pose,Comparison
+Resources,Model Size MB,5.0,150.0,50.5,160.0,180.0,MediaPipe,All
+Resources,Efficiency Score,30.78,1.11,1.96,0.25,0.18,MediaPipe,Comparison
+Resources,Throughput per MB,30.78,1.11,1.96,0.25,0.18,MediaPipe,Comparison
+Resources,Speed Memory Ratio,4.81,5.22,0.48,0.15,0.18,BlazePose,Comparison
+Resources,Memory Efficiency,0.156,4.688,0.245,0.598,0.991,MMPose,Comparison
+Stability,Pose Stability Mean,N/A,N/A,0.585,0.090,0.112,PyTorch Pose,Comparison
+Stability,Jitter Mean px,N/A,N/A,5.53,11.29,56.54,YOLOv8-Pose,Comparison
+Stability,Keypoint Consistency,N/A,N/A,0.599,0.129,0.161,PyTorch Pose,Comparison
+Stability,Skeleton Completeness,N/A,N/A,0.425,1.000,1.000,PyTorch/MMPose,Comparison
+Overall,Success Rate %,100.0,100.0,100.0,100.0,100.0,Tie,All
+Overall,Optuna Maneuvers,200,200,200,200,200,Tie,Optuna
+Overall,Comparison Maneuvers,715,715,715,715,715,Tie,Comparison
+Overall,COCO Images,100,100,100,100,100,Tie,COCO
+Overall,Production Ready,No,No,Yes,No,Maybe,YOLOv8-Pose,Assessment
+Optimization,Method,None,None,Consensus PCK,Consensus PCK,None,N/A,Methodology
+Optimization,Trials Completed,0,0,10,11,0,PyTorch Pose,Optuna
+Optimization,Confidence Threshold,0.619,0.619,0.056,0.988,0.406,N/A,Config
+Optimization,Model Variant,N/A,N/A,l,N/A,lightweight,N/A,Config
+Comparison_vs_Oct19,Consensus PCK@0.2 Oct19,0.347,0.277,0.789,0.788,0.929,N/A,Historical
+Comparison_vs_Oct19,Consensus PCK@0.2 Oct25,0.384,0.312,0.855,0.514,0.679,N/A,Historical
+Comparison_vs_Oct19,Change,+0.037,+0.035,+0.066,-0.274,-0.250,YOLOv8 Improved,Historical
+Comparison_vs_Oct19,Detection Rate Oct19,0.034,0.009,1.000,0.841,1.000,N/A,Historical
+Comparison_vs_Oct19,Detection Rate Oct25,0.034,0.009,1.000,0.411,1.000,N/A,Historical
+Comparison_vs_Oct19,Detection Change,0.000,0.000,0.000,-0.430,0.000,PyTorch Regressed,Historical
+
