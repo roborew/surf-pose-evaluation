@@ -2,41 +2,51 @@ model_name: "pytorch_pose"
 model_class: "PyTorchPoseWrapper"
 
 # PyTorch KeypointRCNN configuration
-confidence_threshold: 0.5 # Will be optimized by Optuna
-keypoint_threshold: 0.2 # Will be optimized by Optuna
-nms_threshold: 0.3 # Will be optimized by Optuna
-max_detections: 10 # Will be optimized by Optuna
+# Default values based on October 19 baseline (proven working configuration)
+confidence_threshold: 0.406
+keypoint_threshold: 0.953
+nms_threshold: 0.612
+max_detections: 15
+box_score_thresh: 0.198
+box_nms_thresh: 0.209
 
-# Optuna hyperparameter search space - OPTIMIZED FOR SURF FOOTAGE
+# Optuna hyperparameter search space - CONSTRAINED FOR SURF FOOTAGE
+# Ranges informed by October 19 baseline to prevent over-conservative tuning
 optuna_search_space:
   confidence_threshold:
     type: "uniform"
-    low: 0.05 # Much lower for challenging surf conditions
-    high: 1.0 # Full range to find optimal confidence threshold
+    low: 0.25    # Constrained: Prevent too-restrictive values
+    high: 0.65   # Constrained: Prevent near-100% thresholds (Oct 25 failed at 0.988)
+    # Oct 19 baseline: 0.406 (center of this range)
 
   keypoint_threshold:
     type: "uniform"
-    low: 0.05 # Much lower for challenging conditions
-    high: 1.0 # Full range to find optimal keypoint threshold
+    low: 0.40    # Constrained: Reasonable for surf conditions
+    high: 0.98   # Allow high keypoint confidence (worked well in Oct 19)
+    # Oct 19 baseline: 0.953 (high keypoint confidence is fine)
 
   nms_threshold:
     type: "uniform"
-    low: 0.1 # Lower for overlapping detections
-    high: 0.8
+    low: 0.35    # Constrained: Reasonable NMS range
+    high: 0.75   # Constrained: Not too high
+    # Oct 19 baseline: 0.612 (middle of range)
 
   max_detections:
     type: "int"
-    low: 5 # Minimum detections
-    high: 25 # Higher for crowded surf conditions
+    low: 10      # Constrained: Minimum 10 to handle multi-person scenes
+    high: 30     # Constrained: Reasonable maximum
     step: 5
+    # Oct 19 baseline: 15 (middle of range)
 
   # Additional surf-specific parameters
   box_score_thresh:
     type: "uniform"
-    low: 0.05 # Lower box detection threshold
-    high: 1.0 # Full range to find optimal box score threshold
+    low: 0.10    # Constrained: Not too restrictive
+    high: 0.50   # Constrained: Prevent over-filtering
+    # Oct 19 baseline: 0.198 (low end, allows detection)
 
   box_nms_thresh:
     type: "uniform"
-    low: 0.1 # Lower NMS threshold for boxes
-    high: 0.8
+    low: 0.15    # Constrained: Reasonable box NMS
+    high: 0.60   # Constrained: Not too high
+    # Oct 19 baseline: 0.209 (low-middle of range)
