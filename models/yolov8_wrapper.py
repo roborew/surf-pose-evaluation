@@ -3,6 +3,7 @@ YOLOv8-Pose wrapper for pose estimation
 """
 
 import time
+import logging
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 import numpy as np
@@ -10,6 +11,8 @@ import cv2
 import torch
 
 from .base_pose_model import BasePoseModel
+
+logger = logging.getLogger(__name__)
 
 try:
     from ultralytics import YOLO
@@ -215,12 +218,14 @@ class YOLOv8Wrapper(BasePoseModel):
 
         # Check for malformed keypoints (debug logging for COCO evaluation)
         if keypoints_xy.shape[1] != 17:
-            print(
-                f"⚠️ YOLOv8 Warning: Expected 17 keypoints, got {keypoints_xy.shape[1]}"
-            )
-            print(f"   Keypoints shape: {keypoints_xy.shape}")
-            print(f"   Scores shape: {keypoints_conf.shape}")
-            print(f"   Will pad/truncate to 17 keypoints")
+            # Only log if it's truly unexpected (not 0, which is normal for no detections)
+            if keypoints_xy.shape[1] != 0:
+                logger.debug(
+                    f"YOLOv8: Adjusting keypoints from {keypoints_xy.shape[1]} to 17 "
+                    f"(shape: {keypoints_xy.shape})"
+                )
+            # Note: 0 keypoints (no detection) is normal and not logged - happens often
+            # in surf footage when surfer is underwater, far away, or obscured
 
             # Ensure exactly 17 keypoints
             fixed_keypoints = np.zeros((num_persons, 17, 2))
