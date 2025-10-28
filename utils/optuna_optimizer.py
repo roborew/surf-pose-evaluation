@@ -70,17 +70,22 @@ class OptunaPoseOptimizer:
                         w_confidence=0.4, w_stability=0.4, w_completeness=0.2
                     )
 
-                    # Initialize consensus manager
-                    consensus_cache_dir = run_manager.run_dir / "consensus_cache"
-                    consensus_cache_dir.mkdir(parents=True, exist_ok=True)
+                    # Initialize consensus manager with shared cache directory
+                    # Cache persists across runs, reducing regeneration time from ~5 hrs to ~0 hrs over time
+                    runs_parent = run_manager.run_dir.parent
+                    shared_cache_root = runs_parent / "shared_consensus_cache"
+                    shared_cache_root.mkdir(parents=True, exist_ok=True)
 
                     self.consensus_manager = ConsensusManager(
                         consensus_models=["yolov8", "pytorch_pose", "mmpose"],
                         quality_filter=quality_filter,
-                        cache_dir=consensus_cache_dir,
+                        cache_dir=shared_cache_root,
                     )
                     logging.info("✅ ConsensusManager initialized successfully")
-                    logging.info(f"   Cache directory: {consensus_cache_dir}")
+                    logging.info(f"   Shared cache directory: {shared_cache_root}")
+                    logging.info(
+                        f"   Cache persists across runs for maximum efficiency"
+                    )
                     logging.info("=" * 80)
                 except ImportError as e:
                     logging.error(

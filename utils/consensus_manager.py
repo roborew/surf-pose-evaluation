@@ -242,6 +242,8 @@ class ConsensusManager:
             logger.info(
                 f"Loading cached consensus for {target_model} from {cache_file.name}"
             )
+            # Log cache hit statistics
+            self.log_cache_stats(target_model, phase, used_cache=True)
             return self._load_from_cache(cache_file)
 
         print(f"\n🔧 GENERATING CONSENSUS GT FOR {target_model.upper()}")
@@ -336,6 +338,9 @@ class ConsensusManager:
             f"  Avg confidence: {stats['avg_confidence']:.3f}\n"
             f"  Cached to: {cache_file.name}"
         )
+
+        # Log cache miss statistics
+        self.log_cache_stats(target_model, phase, used_cache=False)
 
         return gt_data
 
@@ -472,6 +477,75 @@ class ConsensusManager:
             model_name = cache_file.stem.replace(f"_{phase}_gt", "")
             cached_models.append(model_name)
         return cached_models
+
+    def log_cache_stats(self, target_model: str, phase: str, used_cache: bool) -> None:
+        """
+        Log consensus cache statistics to show efficiency gains.
+
+        Args:
+            target_model: Model that was evaluated
+            phase: Phase name ('optuna' or 'comparison')
+            used_cache: Whether cache was used (vs regenerated)
+        """
+        cache_file = self.cache_dir / f"{target_model}_{phase}_gt.json"
+
+        # Count total cache files
+        all_cache_files = list(self.cache_dir.glob("*_gt.json"))
+        total_cached = len(all_cache_files)
+
+        # Estimate time saved (rough estimate: 30 sec per maneuver per model)
+        if used_cache and cache_file.exists():
+            try:
+                with open(cache_file, "r") as f:
+                    gt_data = json.load(f)
+                    num_maneuvers = len(gt_data)
+                    # Assume 2-3 consensus models × 30 sec per maneuver
+                    time_saved_min = num_maneuvers * 2.5 * 0.5  # ~1.25 min per maneuver
+
+                    print(f"\n📦 Consensus Cache Hit!")
+                    print(f"   Model: {target_model} ({phase} phase)")
+                    print(f"   Maneuvers: {num_maneuvers}")
+                    print(f"   Estimated time saved: ~{time_saved_min:.1f} minutes")
+                    print(f"   Total cache files: {total_cached}")
+                    logger.info(
+                        f"Cache hit for {target_model}_{phase}: saved ~{time_saved_min:.1f} min"
+                    )
+            except Exception as e:
+                logger.debug(f"Could not calculate cache stats: {e}")
+        else:
+            print(f"\n🔧 Consensus Cache Miss - Generated Fresh")
+            print(f"   Model: {target_model} ({phase} phase)")
+            print(f"   This data will be cached for future runs")
+            print(f"   Total cache files: {total_cached}")
+
+    def get_cache_summary(self) -> Dict[str, Any]:
+        """
+        Get summary statistics about the cache.
+
+        Returns:
+            Dictionary with cache statistics
+        """
+        cache_files = list(self.cache_dir.glob("*_gt.json"))
+
+        stats = {
+            "total_cache_files": len(cache_files),
+            "cache_directory": str(self.cache_dir),
+            "cached_models": {},
+        }
+
+        for cache_file in cache_files:
+            try:
+                with open(cache_file, "r") as f:
+                    data = json.load(f)
+                    model_phase = cache_file.stem.replace("_gt", "")
+                    stats["cached_models"][model_phase] = {
+                        "num_maneuvers": len(data),
+                        "file_size_mb": cache_file.stat().st_size / (1024 * 1024),
+                    }
+            except Exception as e:
+                logger.debug(f"Could not read cache file {cache_file}: {e}")
+
+        return stats
 
 
 if __name__ == "__main__":

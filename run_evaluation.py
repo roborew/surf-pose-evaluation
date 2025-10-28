@@ -113,6 +113,24 @@ def parse_arguments():
         help="YAML file with predetermined params for consensus models (yolov8, pytorch_pose, mmpose)",
     )
 
+    # Consensus cache management arguments
+    parser.add_argument(
+        "--show-consensus-cache-stats",
+        action="store_true",
+        help="Show consensus cache statistics and exit",
+    )
+    parser.add_argument(
+        "--clean-consensus-cache",
+        action="store_true",
+        help="Remove old/unused consensus cache entries",
+    )
+    parser.add_argument(
+        "--consensus-cache-max-age-days",
+        type=int,
+        default=30,
+        help="Maximum age in days for cache files when cleaning (default: 30)",
+    )
+
     return parser.parse_args()
 
 
@@ -1620,6 +1638,99 @@ def main():
 
     # Parse arguments
     args = parse_arguments()
+
+    # Handle consensus cache management commands before full initialization
+    if args.show_consensus_cache_stats or args.clean_consensus_cache:
+        import shutil
+
+        # Determine cache directory location
+        results_dir = Path(
+            "data/SD_02_SURF_FOOTAGE_PREPT/05_ANALYSED_DATA/POSE_EXPERIMENTS/results/runs"
+        )
+        shared_cache_dir = results_dir / "shared_consensus_cache"
+
+        if not shared_cache_dir.exists():
+            print(f"📦 Consensus cache directory not found: {shared_cache_dir}")
+            print("   No cache has been generated yet.")
+            sys.exit(0)
+
+        if args.show_consensus_cache_stats:
+            print("=" * 70)
+            print("📊 CONSENSUS CACHE STATISTICS")
+            print("=" * 70)
+            print(f"\n📁 Cache Directory: {shared_cache_dir}")
+
+            cache_files = list(shared_cache_dir.glob("*_gt.json"))
+            print(f"\n📦 Total Cache Files: {len(cache_files)}")
+
+            if cache_files:
+                total_size_mb = sum(f.stat().st_size for f in cache_files) / (
+                    1024 * 1024
+                )
+                print(f"💾 Total Cache Size: {total_size_mb:.2f} MB")
+
+                print(f"\n📋 Cached Models and Phases:")
+                for cache_file in sorted(cache_files):
+                    file_size_mb = cache_file.stat().st_size / (1024 * 1024)
+                    modified_time = time.strftime(
+                        "%Y-%m-%d %H:%M:%S", time.localtime(cache_file.stat().st_mtime)
+                    )
+                    model_phase = cache_file.stem.replace("_gt", "")
+
+                    # Try to count maneuvers
+                    try:
+                        with open(cache_file, "r") as f:
+                            data = json.load(f)
+                            num_maneuvers = len(data)
+                        print(
+                            f"   • {model_phase:30} {num_maneuvers:3} maneuvers  {file_size_mb:6.2f} MB  {modified_time}"
+                        )
+                    except:
+                        print(
+                            f"   • {model_phase:30} {'?':3} maneuvers  {file_size_mb:6.2f} MB  {modified_time}"
+                        )
+
+                print(
+                    f"\n💡 Cache persists across runs - reusing these predictions saves hours of computation!"
+                )
+
+            sys.exit(0)
+
+        if args.clean_consensus_cache:
+            print("=" * 70)
+            print("🧹 CLEANING CONSENSUS CACHE")
+            print("=" * 70)
+            print(f"\n📁 Cache Directory: {shared_cache_dir}")
+            print(
+                f"🕒 Removing files older than {args.consensus_cache_max_age_days} days..."
+            )
+
+            cache_files = list(shared_cache_dir.glob("*_gt.json"))
+            now = time.time()
+            max_age_seconds = args.consensus_cache_max_age_days * 24 * 60 * 60
+
+            removed_count = 0
+            removed_size_mb = 0
+
+            for cache_file in cache_files:
+                file_age_seconds = now - cache_file.stat().st_mtime
+                if file_age_seconds > max_age_seconds:
+                    file_size_mb = cache_file.stat().st_size / (1024 * 1024)
+                    removed_size_mb += file_size_mb
+                    removed_count += 1
+                    print(f"   🗑️  Removing: {cache_file.name} ({file_size_mb:.2f} MB)")
+                    cache_file.unlink()
+
+            if removed_count == 0:
+                print(
+                    f"   ✅ No files older than {args.consensus_cache_max_age_days} days found"
+                )
+            else:
+                print(f"\n✅ Removed {removed_count} files ({removed_size_mb:.2f} MB)")
+                remaining = len(list(shared_cache_dir.glob("*_gt.json")))
+                print(f"📦 Remaining cache files: {remaining}")
+
+            sys.exit(0)
 
     # Validate parameters and display errors/warnings
     errors, warnings = validate_parameters(args)

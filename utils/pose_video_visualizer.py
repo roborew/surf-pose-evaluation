@@ -662,8 +662,13 @@ class PoseVideoVisualizer:
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    timeout=60,  # 1 minute max for audio extraction
                 )
                 has_audio = temp_audio.exists() and temp_audio.stat().st_size > 0
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    f"⏱️ Audio extraction timeout after 60 seconds - skipping audio"
+                )
             except subprocess.CalledProcessError:
                 logger.warning("Could not extract audio from original video")
 
@@ -715,16 +720,32 @@ class PoseVideoVisualizer:
 
             cmd.append(output_path)
 
-            # Run FFmpeg
-            result = subprocess.run(
-                cmd,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-            )
+            # Run FFmpeg with timeout to prevent infinite hangs
+            try:
+                result = subprocess.run(
+                    cmd,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True,
+                    timeout=300,  # 5 minutes max per video encoding
+                )
 
-            return os.path.exists(output_path)
+                return os.path.exists(output_path)
+
+            except subprocess.TimeoutExpired:
+                logger.warning(f"⏱️ FFmpeg timeout after 5 minutes for: {output_path}")
+                logger.warning(f"   Skipping visualization, continuing pipeline")
+                # Clean up temp frames if they exist
+                if frames_dir.exists():
+                    try:
+                        shutil.rmtree(frames_dir)
+                        logger.debug(f"   Cleaned up temp frames: {frames_dir}")
+                    except Exception as cleanup_error:
+                        logger.debug(
+                            f"   Could not clean up temp frames: {cleanup_error}"
+                        )
+                return False
 
         except subprocess.CalledProcessError as e:
             logger.error(f"FFmpeg error: {e.stderr}")
