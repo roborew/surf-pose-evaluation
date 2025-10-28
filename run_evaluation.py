@@ -507,9 +507,12 @@ def run_optuna_phase(
     args,
     optuna_maneuvers: List,
     memory_profiler=None,
-    precomputed_predictions=None,
 ) -> Dict:
-    """Run Optuna optimization phase with pre-selected data and dynamic time allocation"""
+    """Run Optuna optimization phase with pre-selected data and dynamic time allocation
+    
+    Note: Consensus predictions are now lazily generated and cached in shared_consensus_cache/
+    No precomputed predictions needed - the OptunaPoseOptimizer handles caching internally.
+    """
     logger = logging.getLogger(__name__)
 
     logger.info("🔍 Starting Optuna optimization phase with dynamic time allocation...")
@@ -542,12 +545,8 @@ def run_optuna_phase(
     dynamic_optimizer = create_dynamic_optimizer_from_config(config)
 
     # Initialize optimizer with pre-selected data
+    # Consensus predictions are now handled lazily via shared cache in OptunaPoseOptimizer
     optimizer = OptunaPoseOptimizer(config, run_manager)
-
-    # Set precomputed predictions if available
-    if precomputed_predictions:
-        logger.info("✓ Setting precomputed consensus predictions for Optuna")
-        optimizer.set_precomputed_predictions(precomputed_predictions)
 
     logger.info(
         f"Using pre-selected {len(optuna_maneuvers)} maneuvers for optimization"
@@ -1890,83 +1889,9 @@ def main():
                 f"📖 Visualization manifest ready: {Path(visualization_manifest_path).name}"
             )
 
-        # Phase 0A: Consensus Cache Discovery and Loading
-        optuna_precomputed_predictions = None
-        if not args.skip_optuna and not args.comparison_only and optuna_maneuvers:
-            logger.info("\n" + "=" * 80)
-            logger.info("PHASE 0A: CONSENSUS CACHE MANAGEMENT")
-            logger.info("=" * 80)
-
-            # Try to discover existing cache
-            discovered_cache = discover_consensus_cache(optuna_config, run_manager)
-
-            if discovered_cache:
-                # Load from discovered cache
-                try:
-                    cache_file = (
-                        discovered_cache / "pregenerated_optuna_predictions.json"
-                    )
-                    logger.info(f"📦 Loading consensus predictions from cache...")
-                    with open(cache_file) as f:
-                        optuna_precomputed_predictions = json.load(f)
-                    logger.info(
-                        f"✅ Loaded {len(optuna_precomputed_predictions)} model predictions from cache"
-                    )
-                    logger.info(
-                        f"   Models: {', '.join(optuna_precomputed_predictions.keys())}"
-                    )
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to load cache: {e}")
-                    logger.info("   Will regenerate consensus predictions")
-                    discovered_cache = None
-
-            # Generate new cache if none found or loading failed
-            if not discovered_cache:
-                logger.info("🔄 Generating fresh consensus predictions...")
-
-                # Load consensus parameters
-                cache_config = optuna_config.get("consensus_cache", {})
-                params_source = cache_config.get("regenerate_params_source", "defaults")
-
-                # Get consensus params based on source
-                consensus_params = {}
-                if params_source == "defaults":
-                    logger.info("📄 Using model default parameters for consensus")
-                    consensus_params = load_consensus_params(args, optuna_config)
-                # Can extend with "best_params" or "file" options later
-
-                # Initialize consensus manager
-                from utils.consensus_manager import ConsensusManager
-                from utils.quality_filter import AdaptiveQualityFilter
-
-                quality_filter = AdaptiveQualityFilter(
-                    w_confidence=0.4, w_stability=0.4, w_completeness=0.2
-                )
-                consensus_cache_dir = run_manager.run_dir / "consensus_cache"
-                consensus_cache_dir.mkdir(parents=True, exist_ok=True)
-
-                consensus_manager = ConsensusManager(
-                    consensus_models=["yolov8", "pytorch_pose", "mmpose"],
-                    quality_filter=quality_filter,
-                    cache_dir=consensus_cache_dir,
-                )
-
-                # Pre-generate predictions
-                optuna_precomputed_predictions = (
-                    consensus_manager.pregenerate_consensus_predictions(
-                        maneuvers=optuna_maneuvers,
-                        consensus_params=consensus_params,
-                        phase="optuna",
-                    )
-                )
-
-                logger.info(
-                    "✅ Phase 0A complete: Consensus predictions generated and cached"
-                )
-
-            logger.info("=" * 80 + "\n")
-
         # Phase 1: Optuna Optimization
+        # Note: Consensus cache is now handled lazily within OptunaPoseOptimizer
+        # using shared_consensus_cache/ with per-maneuver files
         if not args.skip_optuna and not args.comparison_only:
             memory_profiler.log_milestone("optuna_phase_start")
             if optuna_maneuvers:
@@ -1975,7 +1900,6 @@ def main():
                     args,
                     optuna_maneuvers,
                     memory_profiler,
-                    precomputed_predictions=optuna_precomputed_predictions,
                 )
                 results["optuna_phase"] = "completed"
                 results["configs_used"].append(optuna_result["config_path"])
@@ -2022,79 +1946,9 @@ def main():
                 logger.warning("⏭️ Skipping COCO validation phase")
                 results["coco_validation_phase"] = "skipped"
 
-        # Phase 0B: Pre-Generate Consensus Predictions for Comparison (with optimized params)
-        comparison_precomputed_predictions = None
-        if not args.skip_comparison and not args.optuna_only and comparison_maneuvers:
-            pregen_config = optuna_config.get("consensus_pregeneration", {})
-            if (
-                pregen_config.get("enabled", True)
-                and results.get("optuna_phase") == "completed"
-            ):
-                logger.info("\n" + "=" * 80)
-                logger.info(
-                    "PHASE 0B: PRE-GENERATING CONSENSUS PREDICTIONS FOR COMPARISON"
-                )
-                logger.info("=" * 80)
-                logger.info("Using OPTIMIZED parameters from Optuna Phase 1")
-
-                # Load optimized parameters from best_params
-                best_params_dir = run_manager.run_dir / "best_params"
-                best_params_file = best_params_dir / "best_parameters.yaml"
-
-                if best_params_file.exists():
-                    with open(best_params_file) as f:
-                        optimized_params = yaml.safe_load(f)
-
-                    consensus_params = {
-                        model: optimized_params.get(model, {})
-                        for model in ["yolov8", "pytorch_pose", "mmpose"]
-                    }
-                    logger.info(
-                        f"✓ Loaded optimized params for: {list(consensus_params.keys())}"
-                    )
-
-                    # Initialize consensus manager
-                    from utils.consensus_manager import ConsensusManager
-                    from utils.quality_filter import AdaptiveQualityFilter
-
-                    quality_filter = AdaptiveQualityFilter(
-                        w_confidence=0.4, w_stability=0.4, w_completeness=0.2
-                    )
-                    consensus_cache_dir = run_manager.run_dir / "consensus_cache"
-                    consensus_cache_dir.mkdir(parents=True, exist_ok=True)
-
-                    consensus_manager = ConsensusManager(
-                        consensus_models=["yolov8", "pytorch_pose", "mmpose"],
-                        quality_filter=quality_filter,
-                        cache_dir=consensus_cache_dir,
-                    )
-
-                    # Pre-generate predictions with optimized params
-                    comparison_precomputed_predictions = (
-                        consensus_manager.pregenerate_consensus_predictions(
-                            maneuvers=comparison_maneuvers,
-                            consensus_params=consensus_params,
-                            phase="comparison",
-                        )
-                    )
-
-                    logger.info(
-                        "✅ Phase 0B complete: Consensus predictions cached with optimized params"
-                    )
-                    logger.info("=" * 80 + "\n")
-                else:
-                    logger.warning("⚠️ Best params not found, skipping Phase 0B")
-            elif (
-                pregen_config.get("enabled", True)
-                and results.get("optuna_phase") != "completed"
-            ):
-                logger.info(
-                    "⏭️ Skipping Phase 0B: No optimized params available (Optuna was skipped)"
-                )
-            else:
-                logger.info("⏭️ Consensus pre-generation disabled in config")
-
         # Phase 3: Production Dataset Comparison (Multi-step)
+        # Note: Consensus cache is now handled lazily within comparison phase
+        # using shared_consensus_cache/ with per-maneuver files
         if not args.skip_comparison and not args.optuna_only:
             memory_profiler.log_milestone("comparison_phase_start")
             if comparison_maneuvers:

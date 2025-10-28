@@ -46,9 +46,6 @@ class OptunaPoseOptimizer:
         )
         self.consensus_manager = None
         self.consensus_gt = None  # Cache for consensus ground truth
-        self.precomputed_predictions = (
-            None  # Cache for precomputed predictions from Phase 0
-        )
 
         if self.use_consensus:
             if not run_manager:
@@ -101,17 +98,6 @@ class OptunaPoseOptimizer:
                         exc_info=True,
                     )
                     self.use_consensus = False
-
-    def set_precomputed_predictions(self, predictions: Dict[str, Dict[str, List]]):
-        """
-        Set precomputed predictions for consensus generation.
-
-        Args:
-            predictions: Precomputed predictions from Phase 0
-                Format: {model_name: {maneuver_id: [frame_predictions]}}
-        """
-        self.precomputed_predictions = predictions
-        logging.info(f"✓ Precomputed predictions set for {len(predictions)} models")
 
     def optimize_model(
         self, model_name: str, maneuvers: List, memory_profiler=None
@@ -203,7 +189,6 @@ class OptunaPoseOptimizer:
                                 maneuvers=maneuvers,
                                 target_model=model_name,
                                 phase="optuna",
-                                precomputed_predictions=self.precomputed_predictions,
                             )
                         )
                         print(f"✅ Consensus GT loaded/generated")
