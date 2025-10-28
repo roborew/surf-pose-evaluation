@@ -1656,70 +1656,99 @@ def main():
 
         if args.show_consensus_cache_stats:
             print("=" * 70)
-            print("📊 CONSENSUS CACHE STATISTICS")
+            print("📊 CONSENSUS CACHE STATISTICS (Per-Maneuver Format)")
             print("=" * 70)
             print(f"\n📁 Cache Directory: {shared_cache_dir}")
 
-            cache_files = list(shared_cache_dir.glob("*_gt.json"))
-            print(f"\n📦 Total Cache Files: {len(cache_files)}")
+            # Count cache subdirectories and files
+            cache_subdirs = [d for d in shared_cache_dir.iterdir() if d.is_dir()]
+            print(f"\n📦 Model-Phase Directories: {len(cache_subdirs)}")
 
-            if cache_files:
-                total_size_mb = sum(f.stat().st_size for f in cache_files) / (
-                    1024 * 1024
-                )
-                print(f"💾 Total Cache Size: {total_size_mb:.2f} MB")
+            if cache_subdirs:
+                total_files = 0
+                total_size_mb = 0
 
-                print(f"\n📋 Cached Models and Phases:")
-                for cache_file in sorted(cache_files):
-                    file_size_mb = cache_file.stat().st_size / (1024 * 1024)
-                    modified_time = time.strftime(
-                        "%Y-%m-%d %H:%M:%S", time.localtime(cache_file.stat().st_mtime)
+                print(f"\n📋 Cached Model-Phases:")
+                for cache_subdir in sorted(cache_subdirs):
+                    cache_files = list(cache_subdir.glob("*.json"))
+                    num_files = len(cache_files)
+                    subdir_size = sum(f.stat().st_size for f in cache_files)
+                    subdir_size_mb = subdir_size / (1024 * 1024)
+                    avg_file_size_kb = (
+                        (subdir_size / num_files / 1024) if num_files > 0 else 0
                     )
-                    model_phase = cache_file.stem.replace("_gt", "")
 
-                    # Try to count maneuvers
-                    try:
-                        with open(cache_file, "r") as f:
-                            data = json.load(f)
-                            num_maneuvers = len(data)
-                        print(
-                            f"   • {model_phase:30} {num_maneuvers:3} maneuvers  {file_size_mb:6.2f} MB  {modified_time}"
-                        )
-                    except:
-                        print(
-                            f"   • {model_phase:30} {'?':3} maneuvers  {file_size_mb:6.2f} MB  {modified_time}"
-                        )
+                    total_files += num_files
+                    total_size_mb += subdir_size_mb
 
+                    # Get most recent modification time
+                    if cache_files:
+                        most_recent = max(f.stat().st_mtime for f in cache_files)
+                        modified_time = time.strftime(
+                            "%Y-%m-%d %H:%M:%S", time.localtime(most_recent)
+                        )
+                    else:
+                        modified_time = "N/A"
+
+                    print(
+                        f"   • {cache_subdir.name:35} {num_files:3} maneuvers  "
+                        f"{subdir_size_mb:6.2f} MB  ({avg_file_size_kb:4.0f} KB/file)  {modified_time}"
+                    )
+
+                print(f"\n💾 Total Statistics:")
+                print(f"   • Total maneuver cache files: {total_files}")
+                print(f"   • Total cache size: {total_size_mb:.2f} MB")
                 print(
-                    f"\n💡 Cache persists across runs - reusing these predictions saves hours of computation!"
+                    f"   • Average file size: {(total_size_mb * 1024 / total_files):.0f} KB"
+                    if total_files > 0
+                    else "   • Average file size: N/A"
+                )
+                print(f"\n💡 Per-maneuver cache = instant lookups, no JSON parsing!")
+                print(
+                    f"   Cache persists across runs - reusing predictions saves hours of computation!"
                 )
 
             sys.exit(0)
 
         if args.clean_consensus_cache:
             print("=" * 70)
-            print("🧹 CLEANING CONSENSUS CACHE")
+            print("🧹 CLEANING CONSENSUS CACHE (Per-Maneuver Format)")
             print("=" * 70)
             print(f"\n📁 Cache Directory: {shared_cache_dir}")
             print(
-                f"🕒 Removing files older than {args.consensus_cache_max_age_days} days..."
+                f"🕒 Removing maneuver files older than {args.consensus_cache_max_age_days} days..."
             )
 
-            cache_files = list(shared_cache_dir.glob("*_gt.json"))
+            # Iterate through subdirectories
+            cache_subdirs = [d for d in shared_cache_dir.iterdir() if d.is_dir()]
             now = time.time()
             max_age_seconds = args.consensus_cache_max_age_days * 24 * 60 * 60
 
             removed_count = 0
             removed_size_mb = 0
+            empty_dirs_removed = 0
 
-            for cache_file in cache_files:
-                file_age_seconds = now - cache_file.stat().st_mtime
-                if file_age_seconds > max_age_seconds:
-                    file_size_mb = cache_file.stat().st_size / (1024 * 1024)
-                    removed_size_mb += file_size_mb
-                    removed_count += 1
-                    print(f"   🗑️  Removing: {cache_file.name} ({file_size_mb:.2f} MB)")
-                    cache_file.unlink()
+            for cache_subdir in cache_subdirs:
+                cache_files = list(cache_subdir.glob("*.json"))
+
+                # Check each maneuver file
+                for cache_file in cache_files:
+                    file_age_seconds = now - cache_file.stat().st_mtime
+                    if file_age_seconds > max_age_seconds:
+                        file_size_mb = cache_file.stat().st_size / (1024 * 1024)
+                        removed_size_mb += file_size_mb
+                        removed_count += 1
+                        print(
+                            f"   🗑️  Removing: {cache_subdir.name}/{cache_file.name} ({file_size_mb:.2f} MB)"
+                        )
+                        cache_file.unlink()
+
+                # Remove empty directories
+                remaining_files = list(cache_subdir.glob("*.json"))
+                if not remaining_files:
+                    print(f"   🗑️  Removing empty directory: {cache_subdir.name}")
+                    cache_subdir.rmdir()
+                    empty_dirs_removed += 1
 
             if removed_count == 0:
                 print(
@@ -1727,8 +1756,19 @@ def main():
                 )
             else:
                 print(f"\n✅ Removed {removed_count} files ({removed_size_mb:.2f} MB)")
-                remaining = len(list(shared_cache_dir.glob("*_gt.json")))
-                print(f"📦 Remaining cache files: {remaining}")
+                if empty_dirs_removed > 0:
+                    print(f"   Removed {empty_dirs_removed} empty directories")
+
+                # Count remaining
+                remaining_subdirs = [
+                    d for d in shared_cache_dir.iterdir() if d.is_dir()
+                ]
+                remaining_files = sum(
+                    len(list(d.glob("*.json"))) for d in remaining_subdirs
+                )
+                print(
+                    f"📦 Remaining: {len(remaining_subdirs)} directories, {remaining_files} maneuver files"
+                )
 
             sys.exit(0)
 

@@ -223,6 +223,7 @@ class ConsensusManager:
     ) -> Dict[str, Any]:
         """
         Generate and cache consensus ground truth for target model.
+        Uses per-maneuver cache files for efficient loading and scalability.
 
         Args:
             maneuvers: List of Maneuver objects to process
@@ -234,20 +235,11 @@ class ConsensusManager:
         Returns:
             Dictionary mapping maneuver_id -> consensus frames
         """
-        # Check cache first (but only if not using precomputed predictions)
-        cache_file = self.cache_dir / f"{target_model}_{phase}_gt.json"
+        # Create cache subdirectory for this model/phase
+        cache_subdir = self.cache_dir / f"{target_model}_{phase}"
+        cache_subdir.mkdir(parents=True, exist_ok=True)
 
-        if cache_file.exists() and not precomputed_predictions:
-            print(f"   📦 Loading cached consensus from {cache_file.name}")
-            logger.info(
-                f"Loading cached consensus for {target_model} from {cache_file.name}"
-            )
-            # Log cache hit statistics
-            self.log_cache_stats(target_model, phase, used_cache=True)
-            return self._load_from_cache(cache_file)
-
-        print(f"\n🔧 GENERATING CONSENSUS GT FOR {target_model.upper()}")
-        print(f"   Phase: {phase}")
+        print(f"\n🔧 CONSENSUS GT FOR {target_model.upper()} ({phase})")
         print(f"   Maneuvers to process: {len(maneuvers)}")
         if precomputed_predictions:
             print(f"   Using precomputed predictions: YES ✓")
@@ -264,8 +256,10 @@ class ConsensusManager:
         consensus_models = self.get_consensus_models_for_target(target_model)
         print(f"   Consensus models: {', '.join(consensus_models)}")
 
-        # Generate consensus for all maneuvers
+        # Check cache and generate for missing maneuvers
         gt_data = {}
+        cache_hits = 0
+        cache_misses = 0
         stats = {
             "total_maneuvers": len(maneuvers),
             "successful": 0,
@@ -275,6 +269,33 @@ class ConsensusManager:
         }
 
         for maneuver in tqdm(maneuvers, desc=f"Consensus GT for {target_model}"):
+            maneuver_cache_file = cache_subdir / f"{maneuver.maneuver_id}.json"
+
+            # Try to load from cache first (unless using precomputed predictions)
+            if maneuver_cache_file.exists() and not precomputed_predictions:
+                try:
+                    maneuver_data = self._load_maneuver_from_cache(maneuver_cache_file)
+                    gt_data[maneuver.maneuver_id] = maneuver_data
+                    cache_hits += 1
+
+                    # Update stats
+                    stats["successful"] += 1
+                    stats["total_frames"] += maneuver_data["num_frames"]
+                    if maneuver_data["frames"]:
+                        avg_conf = sum(
+                            frame["confidence"].mean()
+                            for frame in maneuver_data["frames"]
+                        ) / len(maneuver_data["frames"])
+                        stats["avg_confidence"].append(avg_conf)
+                    continue
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to load cached consensus for {maneuver.maneuver_id}: {e}, regenerating"
+                    )
+                    cache_misses += 1
+
+            # Generate fresh consensus if not in cache or cache load failed
+            cache_misses += 1
             try:
                 # Get video path from maneuver
                 video_path = maneuver.file_path
@@ -288,13 +309,17 @@ class ConsensusManager:
                 )
 
                 # Store consensus data
-                gt_data[maneuver.maneuver_id] = {
+                maneuver_data = {
                     "maneuver_id": maneuver.maneuver_id,
                     "maneuver_type": maneuver.maneuver_type,
                     "frames": consensus_frames,
                     "source_models": consensus_models,
                     "num_frames": len(consensus_frames),
                 }
+                gt_data[maneuver.maneuver_id] = maneuver_data
+
+                # Save to individual cache file
+                self._save_maneuver_to_cache(maneuver_cache_file, maneuver_data)
 
                 # Update statistics
                 stats["successful"] += 1
@@ -321,72 +346,70 @@ class ConsensusManager:
         else:
             stats["avg_confidence"] = 0.0
 
-        # Save to cache
-        self._save_to_cache(cache_file, gt_data, stats)
-
         # Log summary
         print(f"\n✅ CONSENSUS GENERATION COMPLETE FOR {target_model.upper()}")
         print(f"   Success: {stats['successful']}/{stats['total_maneuvers']} maneuvers")
+        print(f"   Cache hits: {cache_hits}, Cache misses: {cache_misses}")
         print(f"   Total frames: {stats['total_frames']}")
         print(f"   Avg confidence: {stats['avg_confidence']:.3f}")
-        print(f"   Cached to: {cache_file.name}\n")
+
+        # Calculate time saved
+        time_saved_min = (
+            cache_hits * 1.5
+        )  # Assume ~90 sec per maneuver (3 models × 30 sec)
+        if cache_hits > 0:
+            print(f"   ⚡ Time saved from cache: ~{time_saved_min:.1f} minutes\n")
+        else:
+            print(f"   Cache directory: {cache_subdir}\n")
 
         logger.info(
             f"✓ Consensus generation complete for {target_model}:\n"
             f"  Success: {stats['successful']}/{stats['total_maneuvers']} maneuvers\n"
+            f"  Cache hits: {cache_hits}, misses: {cache_misses}\n"
             f"  Total frames: {stats['total_frames']}\n"
             f"  Avg confidence: {stats['avg_confidence']:.3f}\n"
-            f"  Cached to: {cache_file.name}"
+            f"  Cache directory: {cache_subdir}"
         )
-
-        # Log cache miss statistics
-        self.log_cache_stats(target_model, phase, used_cache=False)
 
         return gt_data
 
-    def _save_to_cache(
+    def _save_maneuver_to_cache(
         self,
         cache_file: Path,
-        gt_data: Dict,
-        stats: Dict,
+        maneuver_data: Dict,
     ):
         """
-        Save consensus data to cache file.
+        Save single maneuver consensus data to cache file.
+        Per-maneuver files for efficient loading and scalability.
 
         Args:
-            cache_file: Path to cache file
-            gt_data: Consensus ground truth data
-            stats: Generation statistics
+            cache_file: Path to cache file for this maneuver
+            maneuver_data: Consensus data for single maneuver
         """
         # Convert numpy arrays to lists for JSON serialization
-        serializable_data = {}
-        for maneuver_id, maneuver_data in gt_data.items():
-            frames_serializable = []
-            for frame in maneuver_data["frames"]:
-                frame_serializable = {
-                    "keypoints": frame["keypoints"].tolist(),
-                    "confidence": frame["confidence"].tolist(),
-                    "source_models": frame["source_models"],
-                    "num_contributing_models": (
-                        frame["num_contributing_models"].tolist()
-                        if hasattr(frame["num_contributing_models"], "tolist")
-                        else frame["num_contributing_models"]
-                    ),
-                }
-                frames_serializable.append(frame_serializable)
-
-            serializable_data[maneuver_id] = {
-                **maneuver_data,
-                "frames": frames_serializable,
+        frames_serializable = []
+        for frame in maneuver_data["frames"]:
+            frame_serializable = {
+                "keypoints": frame["keypoints"].tolist(),
+                "confidence": frame["confidence"].tolist(),
+                "source_models": frame["source_models"],
+                "num_contributing_models": (
+                    frame["num_contributing_models"].tolist()
+                    if hasattr(frame["num_contributing_models"], "tolist")
+                    else frame["num_contributing_models"]
+                ),
             }
+            frames_serializable.append(frame_serializable)
 
         # Create cache structure
         cache_data = {
-            "version": "1.0",
-            "gt_data": serializable_data,
-            "stats": stats,
+            "version": "2.0",  # Updated version for per-maneuver format
+            "maneuver_id": maneuver_data["maneuver_id"],
+            "maneuver_type": maneuver_data["maneuver_type"],
+            "source_models": maneuver_data["source_models"],
+            "num_frames": maneuver_data["num_frames"],
+            "frames": frames_serializable,
             "metadata": {
-                "num_maneuvers": len(gt_data),
                 "quality_filter_config": {
                     "weights": self.quality_filter.weights,
                     "percentile_schedule": self.quality_filter.percentile_schedule,
@@ -394,21 +417,28 @@ class ConsensusManager:
             },
         }
 
-        # Save to file
-        with open(cache_file, "w") as f:
-            json.dump(cache_data, f, indent=2)
+        # Save to file atomically (write to temp file, then rename)
+        temp_file = cache_file.with_suffix(".tmp")
+        try:
+            with open(temp_file, "w") as f:
+                json.dump(cache_data, f, indent=2)
+            temp_file.replace(cache_file)
+        except Exception as e:
+            if temp_file.exists():
+                temp_file.unlink()
+            raise e
 
-        logger.debug(f"Saved consensus cache: {cache_file}")
+        logger.debug(f"Saved consensus cache: {cache_file.name}")
 
-    def _load_from_cache(self, cache_file: Path) -> Dict[str, Any]:
+    def _load_maneuver_from_cache(self, cache_file: Path) -> Dict[str, Any]:
         """
-        Load consensus data from cache file.
+        Load single maneuver consensus data from cache file.
 
         Args:
-            cache_file: Path to cache file
+            cache_file: Path to cache file for this maneuver
 
         Returns:
-            Consensus ground truth data
+            Consensus data for single maneuver
         """
         import numpy as np
 
@@ -416,55 +446,62 @@ class ConsensusManager:
             cache_data = json.load(f)
 
         # Convert lists back to numpy arrays
-        gt_data = {}
-        for maneuver_id, maneuver_data in cache_data["gt_data"].items():
-            frames_with_arrays = []
-            for frame in maneuver_data["frames"]:
-                frame_with_arrays = {
-                    "keypoints": np.array(frame["keypoints"]),
-                    "confidence": np.array(frame["confidence"]),
-                    "source_models": frame["source_models"],
-                    "num_contributing_models": frame["num_contributing_models"],
-                }
-                frames_with_arrays.append(frame_with_arrays)
-
-            gt_data[maneuver_id] = {
-                **maneuver_data,
-                "frames": frames_with_arrays,
+        frames_with_arrays = []
+        for frame in cache_data["frames"]:
+            frame_with_arrays = {
+                "keypoints": np.array(frame["keypoints"]),
+                "confidence": np.array(frame["confidence"]),
+                "source_models": frame["source_models"],
+                "num_contributing_models": frame["num_contributing_models"],
             }
+            frames_with_arrays.append(frame_with_arrays)
 
-        logger.debug(f"Loaded consensus cache: {cache_file}")
-        return gt_data
+        maneuver_data = {
+            "maneuver_id": cache_data["maneuver_id"],
+            "maneuver_type": cache_data["maneuver_type"],
+            "frames": frames_with_arrays,
+            "source_models": cache_data["source_models"],
+            "num_frames": cache_data["num_frames"],
+        }
+
+        logger.debug(f"Loaded consensus cache: {cache_file.name}")
+        return maneuver_data
 
     def clear_cache(
         self, target_model: Optional[str] = None, phase: Optional[str] = None
     ):
         """
         Clear cached consensus data.
+        Works with per-maneuver cache directory structure.
 
         Args:
             target_model: If specified, only clear cache for this model
             phase: If specified, only clear cache for this phase
         """
+        import shutil
+
         if target_model and phase:
-            cache_file = self.cache_dir / f"{target_model}_{phase}_gt.json"
-            if cache_file.exists():
-                cache_file.unlink()
-                logger.info(f"Cleared cache: {cache_file.name}")
+            cache_subdir = self.cache_dir / f"{target_model}_{phase}"
+            if cache_subdir.exists() and cache_subdir.is_dir():
+                shutil.rmtree(cache_subdir)
+                logger.info(f"Cleared cache: {cache_subdir.name}")
         elif target_model:
             # Clear all phases for this model
-            for cache_file in self.cache_dir.glob(f"{target_model}_*.json"):
-                cache_file.unlink()
-                logger.info(f"Cleared cache: {cache_file.name}")
+            for cache_subdir in self.cache_dir.glob(f"{target_model}_*"):
+                if cache_subdir.is_dir():
+                    shutil.rmtree(cache_subdir)
+                    logger.info(f"Cleared cache: {cache_subdir.name}")
         else:
             # Clear all caches
-            for cache_file in self.cache_dir.glob("*.json"):
-                cache_file.unlink()
+            for cache_subdir in self.cache_dir.iterdir():
+                if cache_subdir.is_dir():
+                    shutil.rmtree(cache_subdir)
             logger.info(f"Cleared all caches in {self.cache_dir}")
 
     def get_cached_models(self, phase: str = "optuna") -> List[str]:
         """
         Get list of models that have cached consensus data.
+        Works with per-maneuver cache directory structure.
 
         Args:
             phase: Phase to check ('optuna' or 'comparison')
@@ -473,77 +510,43 @@ class ConsensusManager:
             List of model names with cached data
         """
         cached_models = []
-        for cache_file in self.cache_dir.glob(f"*_{phase}_gt.json"):
-            model_name = cache_file.stem.replace(f"_{phase}_gt", "")
-            cached_models.append(model_name)
+        for cache_subdir in self.cache_dir.iterdir():
+            if cache_subdir.is_dir() and cache_subdir.name.endswith(f"_{phase}"):
+                model_name = cache_subdir.name.replace(f"_{phase}", "")
+                cached_models.append(model_name)
         return cached_models
-
-    def log_cache_stats(self, target_model: str, phase: str, used_cache: bool) -> None:
-        """
-        Log consensus cache statistics to show efficiency gains.
-
-        Args:
-            target_model: Model that was evaluated
-            phase: Phase name ('optuna' or 'comparison')
-            used_cache: Whether cache was used (vs regenerated)
-        """
-        cache_file = self.cache_dir / f"{target_model}_{phase}_gt.json"
-
-        # Count total cache files
-        all_cache_files = list(self.cache_dir.glob("*_gt.json"))
-        total_cached = len(all_cache_files)
-
-        # Estimate time saved (rough estimate: 30 sec per maneuver per model)
-        if used_cache and cache_file.exists():
-            try:
-                with open(cache_file, "r") as f:
-                    gt_data = json.load(f)
-                    num_maneuvers = len(gt_data)
-                    # Assume 2-3 consensus models × 30 sec per maneuver
-                    time_saved_min = num_maneuvers * 2.5 * 0.5  # ~1.25 min per maneuver
-
-                    print(f"\n📦 Consensus Cache Hit!")
-                    print(f"   Model: {target_model} ({phase} phase)")
-                    print(f"   Maneuvers: {num_maneuvers}")
-                    print(f"   Estimated time saved: ~{time_saved_min:.1f} minutes")
-                    print(f"   Total cache files: {total_cached}")
-                    logger.info(
-                        f"Cache hit for {target_model}_{phase}: saved ~{time_saved_min:.1f} min"
-                    )
-            except Exception as e:
-                logger.debug(f"Could not calculate cache stats: {e}")
-        else:
-            print(f"\n🔧 Consensus Cache Miss - Generated Fresh")
-            print(f"   Model: {target_model} ({phase} phase)")
-            print(f"   This data will be cached for future runs")
-            print(f"   Total cache files: {total_cached}")
 
     def get_cache_summary(self) -> Dict[str, Any]:
         """
         Get summary statistics about the cache.
+        Works with per-maneuver cache directory structure.
 
         Returns:
             Dictionary with cache statistics
         """
-        cache_files = list(self.cache_dir.glob("*_gt.json"))
-
         stats = {
-            "total_cache_files": len(cache_files),
+            "total_cache_files": 0,
             "cache_directory": str(self.cache_dir),
-            "cached_models": {},
+            "cached_model_phases": {},
         }
 
-        for cache_file in cache_files:
-            try:
-                with open(cache_file, "r") as f:
-                    data = json.load(f)
-                    model_phase = cache_file.stem.replace("_gt", "")
-                    stats["cached_models"][model_phase] = {
-                        "num_maneuvers": len(data),
-                        "file_size_mb": cache_file.stat().st_size / (1024 * 1024),
-                    }
-            except Exception as e:
-                logger.debug(f"Could not read cache file {cache_file}: {e}")
+        for cache_subdir in self.cache_dir.iterdir():
+            if not cache_subdir.is_dir():
+                continue
+
+            model_phase = cache_subdir.name
+            cache_files = list(cache_subdir.glob("*.json"))
+
+            total_size = sum(f.stat().st_size for f in cache_files)
+
+            stats["cached_model_phases"][model_phase] = {
+                "num_maneuvers": len(cache_files),
+                "total_size_mb": total_size / (1024 * 1024),
+                "avg_file_size_kb": (
+                    (total_size / len(cache_files) / 1024) if cache_files else 0
+                ),
+            }
+            stats["total_cache_files"] += len(cache_files)
 
         return stats
 
